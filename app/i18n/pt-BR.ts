@@ -78,6 +78,7 @@ const messages = {
     navigationDescription: "Navegação principal",
     observability: "Observabilidade",
     openNavigation: "Abrir navegação",
+    projects: "Projetos",
     settings: "Configurações",
     team: "Equipe",
   },

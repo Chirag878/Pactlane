@@ -78,6 +78,7 @@ const messages = {
     navigationDescription: "기본 탐색",
     observability: "관찰성",
     openNavigation: "탐색 열기",
+    projects: "프로젝트",
     settings: "설정",
     team: "팀",
   },

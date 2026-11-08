@@ -9,6 +9,15 @@ import {
 
 export const HOME_PATH = "/home";
 export const NEW_CHAT_PATH = "/chat";
+export const PROJECTS_PATH = "/projects";
+
+export function isProjectAreaPath(pathname: string): boolean {
+  return (
+    pathname === PROJECTS_PATH ||
+    pathname.startsWith(`${PROJECTS_PATH}/`) ||
+    pathname.startsWith("/meetings/")
+  );
+}
 
 const FAILED_CHAT_HANDOFF_PREFIX = "agent-native.chat.failed-handoff:";
 const MAX_FAILED_HANDOFF_BYTES = COMPOSER_CONTEXT_MAX_BYTES * 2 + 32 * 1024;

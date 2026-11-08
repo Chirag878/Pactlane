@@ -9,6 +9,7 @@ import {
   HOME_PATH,
   isChatPathname,
   NEW_CHAT_PATH,
+  PROJECTS_PATH,
   threadIdFromPath,
 } from "@/lib/chat-paths";
 import { TAB_ID } from "@/lib/tab-id";
@@ -18,6 +19,8 @@ export interface NavigationState {
   path?: string;
   publicPath?: string;
   threadId?: string;
+  projectId?: string;
+  meetingId?: string;
 }
 
 export function useNavigationState() {
@@ -64,16 +67,24 @@ function matchesPathPrefix(pathname: string, prefix: string): boolean {
 
 export function navigationStateForPath(pathname: string): NavigationState {
   const threadId = threadIdFromPath(pathname);
+  const projectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
+  const meetingId = pathname.match(/^\/meetings\/([^/]+)/)?.[1];
   return {
     view: viewForPath(pathname),
     path: pathname,
     publicPath: appPathFromLocalRoute(pathname),
     ...(threadId ? { threadId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(meetingId ? { meetingId } : {}),
   };
 }
 
 function viewForPath(pathname: string): string {
   if (isChatPathname(pathname)) return "chat";
+  if (pathname.startsWith("/meetings/")) return "meeting";
+  if (pathname === PROJECTS_PATH || pathname.startsWith(`${PROJECTS_PATH}/`)) {
+    return "projects";
+  }
   if (pathname === HOME_PATH) return "home";
   if (pathname.startsWith("/database")) return "database";
   if (pathname.startsWith("/extensions")) return "extensions";
@@ -93,6 +104,8 @@ function pathForView(view?: string): string {
       return NEW_CHAT_PATH;
     case "home":
       return HOME_PATH;
+    case "projects":
+      return PROJECTS_PATH;
     case "database":
       return "/database";
     case "extensions":

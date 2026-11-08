@@ -75,6 +75,7 @@ const messages = {
     navigationDescription: "التنقل الرئيسي",
     observability: "قابلية المراقبة",
     openNavigation: "فتح التنقل",
+    projects: "المشاريع",
     settings: "الإعدادات",
     team: "الفريق",
   },

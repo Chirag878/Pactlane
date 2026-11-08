@@ -197,4 +197,61 @@ CREATE INDEX IF NOT EXISTS followups_project_recipient_idx
   ON followups (project_id, recipient_id) WHERE recipient_id IS NOT NULL;
 `,
   },
+  {
+    version: 2,
+    name: "pactlane-meeting-analysis",
+    sql: `
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_hash TEXT;
+
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS stated_owner_name TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS stated_due_text TEXT;
+
+ALTER TABLE changes DROP CONSTRAINT IF EXISTS changes_entity_type_check;
+ALTER TABLE changes ADD CONSTRAINT changes_entity_type_check
+  CHECK (entity_type IN ('project', 'person', 'meeting', 'commitment', 'decision', 'evidence', 'followup'));
+
+CREATE TABLE IF NOT EXISTS decisions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE RESTRICT,
+  meeting_id TEXT NOT NULL,
+  description TEXT NOT NULL CONSTRAINT decisions_description_present CHECK (length(btrim(description)) > 0),
+  needs_review BOOLEAN NOT NULL DEFAULT false,
+  review_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT decisions_project_id_id_unique UNIQUE (project_id, id),
+  CONSTRAINT decisions_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS decisions_meeting_idx
+  ON decisions (project_id, meeting_id, created_at);
+
+CREATE TABLE IF NOT EXISTS decision_evidence (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  decision_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  source_quote TEXT NOT NULL CONSTRAINT decision_evidence_quote_present CHECK (length(source_quote) > 0),
+  source_start INTEGER,
+  source_end INTEGER,
+  verification_status TEXT NOT NULL DEFAULT 'unverified'
+    CONSTRAINT decision_evidence_verification_status_check
+    CHECK (verification_status IN ('unverified', 'verified', 'missing', 'ambiguous')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT decision_evidence_offsets_valid CHECK (
+    (source_start IS NULL AND source_end IS NULL)
+    OR (source_start IS NOT NULL AND source_end IS NOT NULL
+        AND source_start >= 0 AND source_end > source_start)
+  ),
+  CONSTRAINT decision_evidence_verified_has_offsets
+    CHECK (verification_status <> 'verified' OR source_start IS NOT NULL),
+  CONSTRAINT decision_evidence_decision_fk FOREIGN KEY (project_id, decision_id)
+    REFERENCES decisions (project_id, id) ON DELETE RESTRICT,
+  CONSTRAINT decision_evidence_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS decision_evidence_decision_idx
+  ON decision_evidence (project_id, decision_id, created_at);
+`,
+  },
 ];

@@ -98,6 +98,8 @@ describe("foundation migration", () => {
       schema.meetings,
       schema.commitments,
       schema.commitmentEvidence,
+      schema.decisions,
+      schema.decisionEvidence,
       schema.changes,
       schema.followups,
     ];
@@ -122,6 +124,10 @@ describe("foundation migration", () => {
     ["commitments_priority_check", COMMITMENT_PRIORITIES],
     [
       "commitment_evidence_verification_status_check",
+      EVIDENCE_VERIFICATION_STATUSES,
+    ],
+    [
+      "decision_evidence_verification_status_check",
       EVIDENCE_VERIFICATION_STATUSES,
     ],
     ["changes_entity_type_check", CHANGE_ENTITY_TYPES],

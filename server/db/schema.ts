@@ -80,6 +80,8 @@ export const meetings = pgTable("meetings", {
   })
     .notNull()
     .default("pending"),
+  /** Set once by save-analysis, so a retried save cannot create duplicates. */
+  analysisHash: text("analysis_hash"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -91,7 +93,11 @@ export const commitments = pgTable("commitments", {
   originMeetingId: text("origin_meeting_id"),
   description: text("description").notNull(),
   ownerId: text("owner_id"),
+  /** The owner's name as verified in the transcript, linked or not. */
+  statedOwnerName: text("stated_owner_name"),
   dueDate: date("due_date", { mode: "string" }),
+  /** The deadline's words as verified in the transcript, such as "by Friday". */
+  statedDueText: text("stated_due_text"),
   priority: text("priority", { enum: COMMITMENT_PRIORITIES }),
   status: text("status", { enum: COMMITMENT_STATUSES })
     .notNull()
@@ -108,6 +114,34 @@ export const commitmentEvidence = pgTable("commitment_evidence", {
   id: id(),
   projectId: text("project_id").notNull(),
   commitmentId: text("commitment_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  sourceQuote: text("source_quote").notNull(),
+  sourceStart: integer("source_start"),
+  sourceEnd: integer("source_end"),
+  verificationStatus: text("verification_status", {
+    enum: EVIDENCE_VERIFICATION_STATUSES,
+  })
+    .notNull()
+    .default("unverified"),
+  createdAt: createdAt(),
+});
+
+/** A choice a meeting made, backed by quotes the same way commitments are. */
+export const decisions = pgTable("decisions", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  description: text("description").notNull(),
+  needsReview: boolean("needs_review").notNull().default(false),
+  reviewReason: text("review_reason"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const decisionEvidence = pgTable("decision_evidence", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  decisionId: text("decision_id").notNull(),
   meetingId: text("meeting_id").notNull(),
   sourceQuote: text("source_quote").notNull(),
   sourceStart: integer("source_start"),

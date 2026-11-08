@@ -41,6 +41,7 @@ export const CHANGE_ENTITY_TYPES = [
   "person",
   "meeting",
   "commitment",
+  "decision",
   "evidence",
   "followup",
 ] as const;
@@ -50,3 +51,9 @@ export const CHANGE_ACTOR_TYPES = ["user", "agent", "system"] as const;
 export const CHANGE_OPERATIONS = ["create", "update", "delete"] as const;
 
 export const FOLLOWUP_STATUSES = ["draft", "approved", "discarded"] as const;
+
+/** Whether a value was said outright or worked out from what was said. */
+export const ANALYSIS_BASES = ["explicit", "inferred"] as const;
+
+export const MAX_EVIDENCE_QUOTE_LENGTH = 2_000;
+export const MAX_TRANSCRIPT_LENGTH = 200_000;

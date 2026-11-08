@@ -32,6 +32,8 @@ Deploying is optional for submission. Use the local app if hosting costs time. J
 
 ## Phase 1: Meeting Intelligence 🟩
 
+**State: built locally and tested with controlled inputs. Extraction by a real model is unverified until a provider is connected.**
+
 - **Goal:** a pasted transcript becomes validated, persisted commitments.
 - **Features:**
   - 🟩 `create-project`, `create-meeting`, `get-meeting`, with access checks

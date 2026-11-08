@@ -80,7 +80,7 @@ Lightweight records. Add new entries at the end. To reverse a decision, add a ne
 - **Decision:** Evidence defaults to `unverified`. Only exact server comparison against the stored transcript may set a verified result. Quotes are never altered to pass.
 - **Alternatives:** Trust model output, or use fuzzy matching, which can mark altered text as verified.
 - **Consequences:** Paraphrased quotes will fail and go to review. Prompts must ask for verbatim quotes.
-- **Status:** Accepted, verification function planned
+- **Status:** Accepted, implemented in Phase 1
 
 ## ADR-011: Commitments have stable identities
 
@@ -104,4 +104,20 @@ Lightweight records. Add new entries at the end. To reverse a decision, add a ne
 - **Decision:** Child tables reference `(project_id, id)`, so the database rejects cross-project links. Historical relationships use `ON DELETE RESTRICT`.
 - **Alternatives:** Application checks only; soft deletes on every table.
 - **Consequences:** Extra `project_id` columns and unique constraints. Hard deletes of records with history are blocked, and an archive feature is needed later.
+- **Status:** Accepted
+
+## ADR-014: First saved analysis wins
+
+- **Context:** An agent can retry a save, and models do not repeat their output exactly. Replacing a saved analysis could discard evidence, which must be preserved.
+- **Decision:** `save-analysis` stores a SHA-256 of its input in `meetings.analysis_hash` by compare-and-set inside its transaction. An identical retry returns the saved result. A different analysis of the same meeting is refused.
+- **Alternatives:** A separate analyses table with versions, more than this phase needs; replacing rows on every save, which loses history.
+- **Consequences:** A poor first analysis cannot be redone until an edit or re-analysis flow exists.
+- **Status:** Accepted
+
+## ADR-015: Analysis never creates people
+
+- **Context:** Names in a transcript are not confirmed identities, and owners are `people` rows.
+- **Decision:** A name verified in a quote is kept in `commitments.stated_owner_name`. `owner_id` is set only when it matches exactly one existing person in the project, and an inferred owner is never assigned.
+- **Alternatives:** Creating a person for each stated name, which risks duplicates and silent assignment.
+- **Consequences:** In a project with no people, commitments show the stated name without an owner link until people can be managed.
 - **Status:** Accepted

@@ -1,6 +1,6 @@
 # Architecture
 
-Status as of 2026-11-08, Phase 0. **Implemented** means the code exists now. Everything else is a design for later phases. In diagrams, dashed boxes have not been built.
+Status as of 2026-11-08, Phase 1. **Implemented** means the code exists now. Everything else is a design for later phases. In diagrams, dashed boxes have not been built.
 
 Framework details were checked against Agent-Native 0.226.0: its documentation, the generated template and the installed package source.
 
@@ -14,7 +14,8 @@ One deployable application, organized by domain. There are no separate services,
 | people | `people` | Table implemented |
 | meetings | `meetings` | Table implemented |
 | commitments | `commitments` | Table implemented |
-| evidence | `commitment_evidence` | Table implemented |
+| decisions | `decisions` | Table implemented |
+| evidence | `commitment_evidence`, `decision_evidence` | Tables implemented |
 | ledger | `changes` | Table implemented |
 | followups | `followups` | Table implemented |
 
@@ -83,7 +84,9 @@ erDiagram
 - **Person** is someone named in a project. Most people never have an account, so owners are `people` rows and not users.
 - **Change** is one recorded modification with before and after state.
 
-Known gap: the user journey extracts **decisions**, but no table exists for them because the initial entity list omitted it. Phase 1 should add one with an additive migration, modeled like commitments with evidence.
+- **Decision** is a choice one meeting made, with its own `decision_evidence` quotes. Decisions are not tracked across meetings.
+- `commitments.stated_owner_name` and `stated_due_text` hold words verified in the transcript. `owner_id` is set only when the name matches exactly one existing `people` row. Analysis never creates a person.
+- `meetings.analysis_hash` is set once by `save-analysis`. An identical retry returns the saved result, and a different analysis for that meeting is refused.
 
 ## Database architecture
 
@@ -125,24 +128,32 @@ Rules that only actions can enforce, to be built with their first action:
 | Ownership columns on `projects` (`owner_email`, `org_id`, `visibility`) | Implemented |
 | `project` registered as a shareable resource, `allowPublic: false`, database CHECK rejecting `public` | Implemented |
 | Identity-column policy for `people.email` | Implemented |
-| `accessFilter` on lists and `assertAccess` before writes in each action | **Planned, Phase 1** |
+| `accessFilter` on project lists and `assertAccess` on every project-scoped action (`server/lib/action-context.ts`) | Implemented |
 | Team roles beyond framework sharing | Deferred |
 
-No domain action exists yet, so no route reads or writes domain tables today. Every project-scoped action must check access to its project: child tables have no ownership columns of their own and inherit access through `project_id`.
+Every project-scoped action must check access to its project: child tables have no ownership columns of their own and inherit access through `project_id`.
 
 The framework doctor's `no-unscoped-queries` and `resource-action-access` guards run on every build and help catch mistakes.
 
 ## Shared actions
 
-Proposed, not implemented. Files use the framework's `verb-noun` naming, and the filename is the action name.
+Files use the framework's `verb-noun` naming, and the filename is the action name.
+
+Implemented:
+
+| Action | Responsibility | Reads or writes | Required access |
+| --- | --- | --- | --- |
+| `create-project` | Create a project owned by the current user | Write | Signed in |
+| `list-projects` | Projects the user can access | Read | Signed in, filtered |
+| `create-meeting` | Store a meeting and its original transcript | Write | Editor |
+| `list-meetings` | A project's meetings, without transcripts | Read | Viewer |
+| `get-meeting` | Meeting, transcript and extracted results | Read | Viewer |
+| `save-analysis` | Validate and persist the agent's extraction as one operation, verify evidence, flag uncertainty | Write | Editor |
+
+Proposed:
 
 | Action | Responsibility | Reads or writes |
 | --- | --- | --- |
-| `create-project` | Create a project owned by the current user | Write |
-| `list-projects` | Projects the user can access | Read |
-| `create-meeting` | Store a meeting and its original transcript | Write |
-| `get-meeting` | Meeting, transcript and extracted results | Read |
-| `save-analysis` | Validate and persist the agent's extraction as one operation, verify evidence, flag uncertainty | Write |
 | `list-commitments` | Filtered commitments, also used for matching before extraction | Read |
 | `update-commitment` | One validated patch for owner, date, description, priority, status | Write |
 | `get-ledger` | History for a commitment or project | Read |
@@ -158,24 +169,27 @@ The framework also exports resource-history and suggestion-proposal actions unde
 
 ## Agent execution model
 
-`server/plugins/agent-chat.ts` configures the template's runtime. `AGENTS.md` is bundled at build time, so its rules are available on Workers, which has no project filesystem. The runtime exposes each action as a tool. No model is configured yet, so this path is untested.
+`server/plugins/agent-chat.ts` configures the template's runtime. `AGENTS.md` is bundled at build time, so its rules are available on Workers, which has no project filesystem. The runtime exposes each action as a tool. Tool exposure and dispatch are tested through the real agent loop with a scripted model. No model is configured yet, so extraction by a real model is untested.
 
 The LLM interprets and proposes. It never determines authorization, verification status or the actor on a change.
 
-### Transcript processing (planned)
+### Transcript processing
+
+The dashed step belongs to Phase 3. Today each meeting's commitments are saved on their own.
 
 ```mermaid
 flowchart TD
-  A[Transcript stored by create-meeting]:::planned --> B[Agent receives meeting context]:::planned
+  A[Transcript stored by create-meeting] --> B[Agent reads it with get-meeting]
   B --> C[Agent reads existing commitments]:::planned
-  C --> D[Agent proposes decisions and commitments]:::planned
-  D --> E[Agent calls save-analysis]:::planned
-  E --> F{Zod and access checks}:::planned
-  F -- invalid --> R[Rejected with a specific error]:::planned
-  F -- valid --> G[Check each quote against the stored transcript]:::planned
-  G --> H[Persist records and verification results]:::planned
-  H --> I[Flag uncertain items for review]:::planned
-  I --> J[UI shows the persisted result]:::planned
+  C --> D[Agent proposes decisions and commitments]
+  B --> D
+  D --> E[Agent calls save-analysis]
+  E --> F{Zod and access checks}
+  F -- invalid --> R[Rejected with a specific error]
+  F -- valid --> G[Check each quote against the stored transcript]
+  G --> H[Persist records and verification results]
+  H --> I[Flag uncertain items for review]
+  I --> J[UI shows the persisted result]
   classDef planned stroke-dasharray: 5 5
 ```
 
@@ -183,7 +197,7 @@ Transcripts are untrusted input. Text inside one can never change instructions, 
 
 ## Source verification
 
-Planned deterministic server function.
+Implemented as a deterministic server function in `server/lib/evidence.ts`, with owner and deadline rules in `server/lib/analysis-review.ts`.
 
 Input: a meeting id and proposed evidence, each a quote with optional offsets. It loads the transcript from the database and never accepts one from the caller.
 
@@ -198,8 +212,9 @@ Rules:
 
 - Matching is exact. Quotes are never altered to make them pass.
 - The server alone sets the result. A caller cannot supply a status.
-- `missing` or `ambiguous` evidence sets `needs_review` on the commitment.
+- `missing` or `ambiguous` evidence sets `needs_review` on the commitment or decision.
 - A verified quote proves only that the words were said. It does not prove an inferred assignee or deadline, so those are reviewed separately.
+- An owner or deadline is kept only when a verified quote contains its words. An inferred owner is never assigned. A date worked out from relative words is saved and flagged.
 - Text is offset by JavaScript string index, so the transcript must stay unmodified.
 
 ## Audit history

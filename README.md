@@ -308,7 +308,7 @@ Evidence recorded 2026-11-09.
 | Chat template scaffold, dependencies, lockfile | **Validated** |
 | Documentation | **Implemented** |
 | Schema and migrations v1 to v4 | **Validated** on PGlite, and v3 and v4 through the framework's migration runner on a copy of a database that already held v2 data |
-| Tests | **Validated**, 236 passing: schema, actions, access control, the real agent loop with a scripted model, health, matching and interface logic |
+| Tests | **Validated**, 244 passing: schema, actions, access control, the real agent loop with a scripted model, health, matching and interface logic |
 | Typecheck, framework doctor | **Validated** |
 | Node and Cloudflare builds | **Validated**, not deployed. Wrangler dry run last run in Phase 0 |
 | Project access checks in actions | **Implemented** and tested, including denial for other users and viewers |
@@ -351,4 +351,8 @@ Team collaboration, calendar and chat integrations, analytics and agenda generat
 
 ---
 
-Built on the [Agent-Native](https://www.agent-native.com/docs/) Chat template.
+## Project provenance
+
+Pactlane started from the [Agent-Native](https://www.agent-native.com/docs/) 0.226.0 standalone Chat template. The template supplied the chat runtime and shell, Better Auth integration, action framework, database and deployment plumbing, and shared Agent-Native interface components.
+
+Meaningful hackathon development in this repository includes Pactlane's domain schema and four migrations; project-scoped meeting and commitment actions; exact server-side evidence verification; human editing, review, people and concurrency controls; deterministic cross-meeting matching, link confirmation and health calculations; Commitment Trail and ledger interfaces; and the Pactlane-specific tests, agent rules and documentation. Live-model extraction, production deployment, proposals, undo and follow-ups are not claimed as completed.

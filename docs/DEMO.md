@@ -1,6 +1,6 @@
 # Demo plan
 
-**Partly functional.** Beats marked Works run in the local application with real actions and saved data. Analysis by a real model has not been run, so beat 1 needs a connected provider. Beats 5 to 7 are not built. Show only what works.
+**Partly functional.** Deterministic beats marked **Tested** run in the local application with real actions and saved controlled data. Analysis by a live model has not been run, so extraction remains **Unverified** until a provider is connected and the result is inspected. **Deferred** beats are not built. Show only what works.
 
 Target: 2 to 3 minutes showing the real application, centered on one commitment across three meetings.
 
@@ -16,9 +16,9 @@ Three short transcripts, each with a real date. All names are fictional, and eac
 
 > Aarav: I'll prepare the presentation before Friday.
 > Priya: I can write the API docs.
-> Meera: Someone should book the demo room.
+> Meera: The demo room will be booked before Friday.
 
-Expected: three commitments. Aarav's has an owner and a due date. Priya's has no due date. The room booking has no owner and needs review.
+Live-model QA expectation, not a verified result: three commitments. Aarav's has an owner and a due date. Priya's has no due date. The passive room-booking promise has no responsible person and needs review.
 
 **Meeting 2, Check-in**
 
@@ -39,15 +39,15 @@ Expected: the presentation is linked to three meetings and still open. It is cal
 
 | Beat | What the viewer sees | State |
 | --- | --- | --- |
-| 1. Process | Paste the first transcript. The agent analyzes it. | Needs a model; unverified |
-| 2. Evidence | Commitments appear with their source quotes and a verified state. | Works |
-| 3. Correct | The ownerless room-booking item is flagged. The user assigns it, and the change persists. | Works |
-| 4. Continue | Open the second meeting. Pactlane suggests the existing commitment, with its reasons. The user confirms the link, and no duplicate appears. | Works |
-| 5. Detect | After the third, the agent identifies the repeated delay. | Not built. The ledger shows revisited and overdue from saved data |
-| 6. Propose | "The presentation commitment has been linked to three meetings and is still open. Would you like to reassign part of the work or adjust the deadline?" | Not built |
-| 7. Decide | The user approves or corrects the proposal. | Not built. Manual correction works |
-| 8. History | The Commitment Trail shows the sequence and who changed what, and each quote opens its own transcript. | Works, without undo |
-| 9. Result | A clear final state: one commitment, its full history and a decided next step. | Works, up to the proposal |
+| 1. Process | Paste the first transcript. The agent analyzes it. | **Unverified** — needs a connected live model |
+| 2. Evidence | Commitments appear with their source quotes and server-produced verification states. | **Tested deterministically** with controlled analysis; live-model extraction unverified |
+| 3. Correct | The ownerless room-booking item is flagged. The user assigns it, and the change persists. | **Tested deterministically** |
+| 4. Continue | Open the second meeting. Pactlane suggests the existing commitment, with its reasons. The user confirms the link, and no duplicate appears. | **Tested deterministically** |
+| 5. Detect | After the third, the agent identifies the repeated delay. | **Deferred**. The deterministic ledger can show revisited and overdue from saved data |
+| 6. Propose | "The presentation commitment has been linked to three meetings and is still open. Would you like to reassign part of the work or adjust the deadline?" | **Deferred** |
+| 7. Decide | The user approves or corrects the proposal. | **Deferred** as an agent proposal; manual correction is tested |
+| 8. History | The Commitment Trail shows the sequence and who changed what, and each quote opens its own transcript. | **Tested deterministically**, without undo |
+| 9. Result | A clear final state: one commitment, its full history and a decided next step. | **Partly tested**; the decided-next-step proposal is deferred |
 
 ## Judging alignment
 

@@ -47,7 +47,9 @@ export default defineAction({
     changed: z.boolean(),
     _receipt: z.custom<WriteReceipt>(),
   }),
-  // The model must not be able to approve its own proposals.
+  // Approval is a deliberate action in this app's signed-in UI. Hiding the
+  // tool alone would still leave other action transports able to call it.
+  uiOnly: true,
   agentTool: false,
   run: async (input, ctx) => {
     const actor = requireActor(ctx);

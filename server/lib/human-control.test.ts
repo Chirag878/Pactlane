@@ -777,13 +777,49 @@ describe("review", () => {
     });
   });
 
-  it("never lets the agent review", async () => {
+  it("allows review from the signed-in app UI", async () => {
     const { priya } = await setUp();
-    const error = await rejection(review(priya, "reject", [], "tool"));
-    expect(error).toMatchObject({ errorCode: "human_review_required" });
+    const result = await review(
+      priya,
+      "confirm",
+      priya.reviewFlags.map((flag) => flag.code),
+      "frontend",
+    );
+    expect(result.commitment.reviewState).toBe("confirmed");
+  });
+
+  it.each([
+    "tool",
+    "mcp",
+    "webmcp",
+    "a2a",
+    "automation",
+    "cli",
+    "http",
+    "mcp-widget-write",
+  ] as ActionCaller[])("refuses the %s caller before review", async (caller) => {
+    const { priya } = await setUp();
+    const error = await rejection(review(priya, "reject", [], caller));
+    expect(error).toMatchObject({
+      errorCode: "ui_only_action",
+      statusCode: 403,
+    });
+
+    const [stored] = await getDb()
+      .select()
+      .from(schema.commitments)
+      .where(eq(schema.commitments.id, priya.id));
+    expect(stored).toMatchObject({
+      version: priya.version,
+      reviewState: priya.reviewState,
+      reviewedBy: null,
+    });
     expect(
-      (reviewCommitment as unknown as { agentTool?: boolean }).agentTool,
-    ).toBe(false);
+      reviewCommitment as unknown as {
+        agentTool?: boolean;
+        uiOnly?: boolean;
+      },
+    ).toMatchObject({ agentTool: false, uiOnly: true });
   });
 
   it("denies review to a user without editor access", async () => {

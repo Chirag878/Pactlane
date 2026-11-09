@@ -14,6 +14,9 @@ export const MEETING_PROCESSING_STATUSES = [
   "failed",
 ] as const;
 
+export const MEETING_FINDING_KINDS = ["open_question", "blocker"] as const;
+export type MeetingFindingKind = (typeof MEETING_FINDING_KINDS)[number];
+
 export const COMMITMENT_STATUSES = [
   "open",
   "in_progress",
@@ -58,6 +61,8 @@ export const CHANGE_ENTITY_TYPES = [
   "meeting",
   "commitment",
   "decision",
+  "finding",
+  "next_meeting",
   "evidence",
   "followup",
 ] as const;

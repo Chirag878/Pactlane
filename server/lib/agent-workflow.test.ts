@@ -135,9 +135,12 @@ describe("agent tool exposure", () => {
     ]);
     const save = tools.find((t) => t.name === "save-analysis")!;
     expect(Object.keys(save.inputSchema.properties ?? {}).sort()).toEqual([
+      "blockers",
       "commitments",
       "decisions",
       "meetingId",
+      "nextMeeting",
+      "openQuestions",
       "summary",
     ]);
   });

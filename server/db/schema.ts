@@ -13,6 +13,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import {
+  ANALYSIS_BASES,
   CHANGE_ACTOR_TYPES,
   CHANGE_ENTITY_TYPES,
   CHANGE_OPERATIONS,
@@ -20,6 +21,7 @@ import {
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
   FOLLOWUP_STATUSES,
+  MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
   REVIEW_STATES,
   type ReviewFlag,
@@ -172,6 +174,70 @@ export const decisionEvidence = pgTable("decision_evidence", {
   id: id(),
   projectId: text("project_id").notNull(),
   decisionId: text("decision_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  sourceQuote: text("source_quote").notNull(),
+  sourceStart: integer("source_start"),
+  sourceEnd: integer("source_end"),
+  verificationStatus: text("verification_status", {
+    enum: EVIDENCE_VERIFICATION_STATUSES,
+  })
+    .notNull()
+    .default("unverified"),
+  createdAt: createdAt(),
+});
+
+/** An unresolved question or blocker identified in one meeting. */
+export const meetingFindings = pgTable("meeting_findings", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  kind: text("kind", { enum: MEETING_FINDING_KINDS }).notNull(),
+  description: text("description").notNull(),
+  needsReview: boolean("needs_review").notNull().default(false),
+  reviewReason: text("review_reason"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const meetingFindingEvidence = pgTable("meeting_finding_evidence", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  findingId: text("finding_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  sourceQuote: text("source_quote").notNull(),
+  sourceStart: integer("source_start"),
+  sourceEnd: integer("source_end"),
+  verificationStatus: text("verification_status", {
+    enum: EVIDENCE_VERIFICATION_STATUSES,
+  })
+    .notNull()
+    .default("unverified"),
+  createdAt: createdAt(),
+});
+
+/** A reviewable suggestion only; it never creates an external event. */
+export const nextMeetingSuggestions = pgTable("next_meeting_suggestions", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  proposedDate: date("proposed_date", { mode: "string" }),
+  statedDateText: text("stated_date_text"),
+  dateBasis: text("date_basis", { enum: ANALYSIS_BASES }),
+  proposedTime: text("proposed_time"),
+  statedTimeText: text("stated_time_text"),
+  participants: jsonb("participants").$type<string[]>().notNull().default([]),
+  purpose: text("purpose"),
+  unknowns: jsonb("unknowns").$type<string[]>().notNull().default([]),
+  needsReview: boolean("needs_review").notNull().default(false),
+  reviewReason: text("review_reason"),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+export const nextMeetingEvidence = pgTable("next_meeting_evidence", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  suggestionId: text("suggestion_id").notNull(),
   meetingId: text("meeting_id").notNull(),
   sourceQuote: text("source_quote").notNull(),
   sourceStart: integer("source_start"),

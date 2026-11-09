@@ -310,4 +310,127 @@ CREATE UNIQUE INDEX IF NOT EXISTS commitment_link_dismissals_unique
   ON commitment_link_dismissals (project_id, commitment_id, meeting_id, md5(source_quote));
 `,
   },
+  {
+    version: 5,
+    name: "pactlane-meeting-intelligence",
+    sql: `
+ALTER TABLE changes DROP CONSTRAINT IF EXISTS changes_entity_type_check;
+ALTER TABLE changes ADD CONSTRAINT changes_entity_type_check
+  CHECK (entity_type IN ('project', 'person', 'meeting', 'commitment', 'decision', 'finding', 'next_meeting', 'evidence', 'followup'));
+
+CREATE TABLE IF NOT EXISTS meeting_findings (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  kind TEXT NOT NULL
+    CONSTRAINT meeting_findings_kind_check CHECK (kind IN ('open_question', 'blocker')),
+  description TEXT NOT NULL
+    CONSTRAINT meeting_findings_description_present CHECK (length(btrim(description)) > 0),
+  needs_review BOOLEAN NOT NULL DEFAULT false,
+  review_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT meeting_findings_project_id_id_unique UNIQUE (project_id, id),
+  CONSTRAINT meeting_findings_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS meeting_findings_meeting_idx
+  ON meeting_findings (project_id, meeting_id, kind, created_at);
+
+CREATE TABLE IF NOT EXISTS meeting_finding_evidence (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  finding_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  source_quote TEXT NOT NULL
+    CONSTRAINT meeting_finding_evidence_quote_present CHECK (length(source_quote) > 0),
+  source_start INTEGER,
+  source_end INTEGER,
+  verification_status TEXT NOT NULL DEFAULT 'unverified'
+    CONSTRAINT meeting_finding_evidence_verification_status_check
+    CHECK (verification_status IN ('unverified', 'verified', 'missing', 'ambiguous')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT meeting_finding_evidence_offsets_valid CHECK (
+    (source_start IS NULL AND source_end IS NULL)
+    OR (source_start IS NOT NULL AND source_end IS NOT NULL
+        AND source_start >= 0 AND source_end > source_start)
+  ),
+  CONSTRAINT meeting_finding_evidence_verified_has_offsets
+    CHECK (verification_status <> 'verified' OR source_start IS NOT NULL),
+  CONSTRAINT meeting_finding_evidence_finding_fk FOREIGN KEY (project_id, finding_id)
+    REFERENCES meeting_findings (project_id, id) ON DELETE RESTRICT,
+  CONSTRAINT meeting_finding_evidence_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS meeting_finding_evidence_finding_idx
+  ON meeting_finding_evidence (project_id, finding_id, created_at);
+CREATE INDEX IF NOT EXISTS meeting_finding_evidence_meeting_idx
+  ON meeting_finding_evidence (project_id, meeting_id);
+
+CREATE TABLE IF NOT EXISTS next_meeting_suggestions (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  proposed_date DATE,
+  stated_date_text TEXT,
+  date_basis TEXT CONSTRAINT next_meeting_suggestions_date_basis_check
+    CHECK (date_basis IN ('explicit', 'inferred')),
+  proposed_time TEXT,
+  stated_time_text TEXT,
+  participants JSONB NOT NULL DEFAULT '[]'::jsonb
+    CONSTRAINT next_meeting_suggestions_participants_is_array
+    CHECK (jsonb_typeof(participants) = 'array'),
+  purpose TEXT,
+  unknowns JSONB NOT NULL DEFAULT '[]'::jsonb
+    CONSTRAINT next_meeting_suggestions_unknowns_is_array
+    CHECK (jsonb_typeof(unknowns) = 'array'),
+  needs_review BOOLEAN NOT NULL DEFAULT false,
+  review_reason TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT next_meeting_suggestions_project_id_id_unique UNIQUE (project_id, id),
+  CONSTRAINT next_meeting_suggestions_meeting_unique UNIQUE (project_id, meeting_id),
+  CONSTRAINT next_meeting_suggestions_date_complete CHECK (
+    (proposed_date IS NULL AND date_basis IS NULL)
+    OR (proposed_date IS NOT NULL AND stated_date_text IS NOT NULL AND date_basis IS NOT NULL)
+  ),
+  CONSTRAINT next_meeting_suggestions_time_complete CHECK (
+    proposed_time IS NULL OR stated_time_text IS NOT NULL
+  ),
+  CONSTRAINT next_meeting_suggestions_time_format CHECK (
+    proposed_time IS NULL OR proposed_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+  ),
+  CONSTRAINT next_meeting_suggestions_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+
+CREATE TABLE IF NOT EXISTS next_meeting_evidence (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  suggestion_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  source_quote TEXT NOT NULL
+    CONSTRAINT next_meeting_evidence_quote_present CHECK (length(source_quote) > 0),
+  source_start INTEGER,
+  source_end INTEGER,
+  verification_status TEXT NOT NULL DEFAULT 'unverified'
+    CONSTRAINT next_meeting_evidence_verification_status_check
+    CHECK (verification_status IN ('unverified', 'verified', 'missing', 'ambiguous')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT next_meeting_evidence_offsets_valid CHECK (
+    (source_start IS NULL AND source_end IS NULL)
+    OR (source_start IS NOT NULL AND source_end IS NOT NULL
+        AND source_start >= 0 AND source_end > source_start)
+  ),
+  CONSTRAINT next_meeting_evidence_verified_has_offsets
+    CHECK (verification_status <> 'verified' OR source_start IS NOT NULL),
+  CONSTRAINT next_meeting_evidence_suggestion_fk FOREIGN KEY (project_id, suggestion_id)
+    REFERENCES next_meeting_suggestions (project_id, id) ON DELETE RESTRICT,
+  CONSTRAINT next_meeting_evidence_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS next_meeting_evidence_suggestion_idx
+  ON next_meeting_evidence (project_id, suggestion_id, created_at);
+`,
+  },
 ];

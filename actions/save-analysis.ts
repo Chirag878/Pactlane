@@ -14,6 +14,7 @@ import {
 import {
   reviewCommitment,
   reviewDecision,
+  reviewNextMeetingSuggestion,
   type ReviewedQuote,
 } from "../server/lib/analysis-review.js";
 import { verifyQuote } from "../server/lib/evidence.js";
@@ -74,6 +75,12 @@ const decisionSchema = z.strictObject({
   reviewNote,
 });
 
+const findingSchema = z.strictObject({
+  description: text(2_000).describe("The unresolved question or blocker"),
+  evidence: z.array(evidenceSchema).max(10),
+  reviewNote,
+});
+
 const basis = z.enum(ANALYSIS_BASES).nullable();
 
 const commitmentSchema = z
@@ -123,15 +130,70 @@ const commitmentSchema = z
     "dueDateText is required with dueDate.",
   );
 
+const nextMeetingSchema = z
+  .strictObject({
+    proposedDate: z.iso.date().nullable(),
+    dateText: z.string().max(200).nullable(),
+    dateBasis: basis,
+    proposedTime: z
+      .string()
+      .regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/)
+      .nullable()
+      .describe("24-hour HH:MM time, or null when unresolved"),
+    timeText: z.string().max(200).nullable(),
+    participants: z.array(text(200)).max(50),
+    purpose: z.string().max(2_000).nullable(),
+    unknowns: z.array(text(500)).max(20),
+    evidence: z.array(evidenceSchema).max(10),
+    reviewNote,
+  })
+  .refine(
+    (suggestion) =>
+      (suggestion.proposedDate === null) === (suggestion.dateBasis === null),
+    "dateBasis is required with proposedDate, and must be null without it.",
+  )
+  .refine(
+    (suggestion) =>
+      suggestion.proposedDate === null || suggestion.dateText !== null,
+    "dateText is required with proposedDate.",
+  )
+  .refine(
+    (suggestion) =>
+      suggestion.proposedTime === null || suggestion.timeText !== null,
+    "timeText is required with proposedTime.",
+  );
+
 const inputSchema = z.strictObject({
   meetingId: z.string().min(1).describe("Meeting being analyzed"),
   summary: text(5_000).describe("Short factual summary of the meeting"),
   decisions: z.array(decisionSchema).max(100),
   commitments: z.array(commitmentSchema).max(200),
+  openQuestions: z.array(findingSchema).max(100).default([]),
+  blockers: z.array(findingSchema).max(100).default([]),
+  nextMeeting: nextMeetingSchema.nullable().default(null),
 });
 
 async function hashAnalysis(analysis: z.output<typeof inputSchema>) {
-  const bytes = new TextEncoder().encode(JSON.stringify(analysis));
+  // Preserve the v1-v4 hash for old callers and already-saved meetings. New
+  // fields enter the hash only when the analysis actually contains them.
+  const legacy = {
+    meetingId: analysis.meetingId,
+    summary: analysis.summary,
+    decisions: analysis.decisions,
+    commitments: analysis.commitments,
+  };
+  const canonical =
+    analysis.openQuestions.length === 0 &&
+    analysis.blockers.length === 0 &&
+    analysis.nextMeeting === null
+      ? legacy
+      : {
+          ...legacy,
+          openQuestions: analysis.openQuestions,
+          blockers: analysis.blockers,
+          nextMeeting: analysis.nextMeeting,
+        };
+  const bytes = new TextEncoder().encode(JSON.stringify(canonical));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest), (byte) =>
     byte.toString(16).padStart(2, "0"),
@@ -164,7 +226,7 @@ const alreadySaved = (): never =>
 
 export default defineAction({
   description:
-    "Save the analysis of a meeting: summary, decisions and commitments with transcript quotations. The server checks every quotation against the stored transcript, sets verification status, and flags anything uncertain for review. Repeating an identical save is safe. A meeting's first saved analysis cannot be replaced.",
+    "Save the analysis of a meeting: factual summary, commitments/action items, decisions, open questions, blockers, and an optional reviewable next-meeting suggestion with transcript quotations. Unknown owners, dates, and times stay unknown. The server checks every quotation against the stored transcript, sets verification status, and flags uncertainty for review. Repeating an identical save is safe. A meeting's first saved analysis cannot be replaced.",
   schema: inputSchema,
   outputSchema: meetingResultSchema.extend({
     replayed: z
@@ -226,6 +288,39 @@ export default defineAction({
         ...reviewCommitment(commitment, quotes, people),
       };
     });
+    const findings = [
+      ...analysis.openQuestions.map((finding) => ({
+        ...finding,
+        kind: "open_question" as const,
+      })),
+      ...analysis.blockers.map((finding) => ({
+        ...finding,
+        kind: "blocker" as const,
+      })),
+    ].map((finding) => {
+      const quotes = verifyAll(transcript, finding.evidence);
+      return {
+        id: crypto.randomUUID(),
+        kind: finding.kind,
+        description: finding.description.trim(),
+        quotes,
+        ...reviewDecision(finding.reviewNote, quotes),
+      };
+    });
+    const nextMeeting = analysis.nextMeeting
+      ? (() => {
+          const quotes = verifyAll(transcript, analysis.nextMeeting.evidence);
+          return {
+            id: crypto.randomUUID(),
+            purpose: analysis.nextMeeting.purpose?.trim() || null,
+            unknowns: analysis.nextMeeting.unknowns.map((unknown) =>
+              unknown.trim(),
+            ),
+            quotes,
+            ...reviewNextMeetingSuggestion(analysis.nextMeeting, quotes),
+          };
+        })()
+      : null;
 
     const evidenceRow = ({ quote, verification }: ReviewedQuote) => ({
       id: crypto.randomUUID(),
@@ -242,6 +337,18 @@ export default defineAction({
     const commitmentEvidence = commitments.flatMap((c) =>
       c.quotes.map((q) => ({ ...evidenceRow(q), commitmentId: c.id })),
     );
+    const findingEvidence = findings.flatMap((finding) =>
+      finding.quotes.map((quote) => ({
+        ...evidenceRow(quote),
+        findingId: finding.id,
+      })),
+    );
+    const nextMeetingEvidence = nextMeeting
+      ? nextMeeting.quotes.map((quote) => ({
+          ...evidenceRow(quote),
+          suggestionId: nextMeeting.id,
+        }))
+      : [];
 
     const changeBase = {
       projectId,
@@ -249,7 +356,12 @@ export default defineAction({
       actorId: actor.email,
     };
     const created = (
-      entityType: "commitment" | "decision" | "evidence",
+      entityType:
+        | "commitment"
+        | "decision"
+        | "finding"
+        | "next_meeting"
+        | "evidence",
       entityId: string,
       afterState: Record<string, unknown>,
     ) => ({
@@ -296,11 +408,34 @@ export default defineAction({
           })),
         );
       }
+      if (findings.length > 0) {
+        await tx.insert(schema.meetingFindings).values(
+          findings.map(({ quotes: _quotes, ...finding }) => ({
+            ...finding,
+            projectId,
+            meetingId,
+          })),
+        );
+      }
+      if (nextMeeting) {
+        const { quotes: _quotes, ...suggestion } = nextMeeting;
+        await tx.insert(schema.nextMeetingSuggestions).values({
+          ...suggestion,
+          projectId,
+          meetingId,
+        });
+      }
       if (decisionEvidence.length > 0) {
         await tx.insert(schema.decisionEvidence).values(decisionEvidence);
       }
       if (commitmentEvidence.length > 0) {
         await tx.insert(schema.commitmentEvidence).values(commitmentEvidence);
+      }
+      if (findingEvidence.length > 0) {
+        await tx.insert(schema.meetingFindingEvidence).values(findingEvidence);
+      }
+      if (nextMeetingEvidence.length > 0) {
+        await tx.insert(schema.nextMeetingEvidence).values(nextMeetingEvidence);
       }
 
       await tx.insert(schema.changes).values([
@@ -338,15 +473,51 @@ export default defineAction({
             reviewFlags: c.reviewFlags.map((f) => f.code),
           }),
         ),
-        ...[...decisionEvidence, ...commitmentEvidence].map((e) =>
-          created("evidence", e.id, {
-            ...("decisionId" in e
-              ? { decisionId: e.decisionId }
-              : { commitmentId: e.commitmentId }),
-            sourceQuote: e.sourceQuote,
-            verificationStatus: e.verificationStatus,
+        ...findings.map((finding) =>
+          created("finding", finding.id, {
+            kind: finding.kind,
+            description: finding.description,
+            needsReview: finding.needsReview,
+            reviewReason: finding.reviewReason,
           }),
         ),
+        ...(nextMeeting
+          ? [
+              created("next_meeting", nextMeeting.id, {
+                proposedDate: nextMeeting.proposedDate,
+                statedDateText: nextMeeting.statedDateText,
+                dateBasis: nextMeeting.dateBasis,
+                proposedTime: nextMeeting.proposedTime,
+                statedTimeText: nextMeeting.statedTimeText,
+                participants: nextMeeting.participants,
+                purpose: nextMeeting.purpose,
+                unknowns: nextMeeting.unknowns,
+                needsReview: nextMeeting.needsReview,
+                reviewReason: nextMeeting.reviewReason,
+              }),
+            ]
+          : []),
+        ...[
+          ...decisionEvidence,
+          ...commitmentEvidence,
+          ...findingEvidence,
+          ...nextMeetingEvidence,
+        ].map((e) => {
+          // Each evidence table has exactly one parent key.
+          const parent =
+            "decisionId" in e
+              ? { decisionId: e.decisionId }
+              : "commitmentId" in e
+                ? { commitmentId: e.commitmentId }
+                : "findingId" in e
+                  ? { findingId: e.findingId }
+                  : { suggestionId: e.suggestionId };
+          return created("evidence", e.id, {
+            ...parent,
+            sourceQuote: e.sourceQuote,
+            verificationStatus: e.verificationStatus,
+          });
+        }),
       ]);
       return true;
     });
@@ -361,14 +532,21 @@ export default defineAction({
     const persisted =
       result.analysisSaved &&
       result.decisions.length === decisions.length &&
-      result.commitments.length === commitments.length;
-    const flagged = [...result.decisions, ...result.commitments].filter(
-      (item) => item.needsReview,
-    ).length;
+      result.commitments.length === commitments.length &&
+      result.openQuestions.length === analysis.openQuestions.length &&
+      result.blockers.length === analysis.blockers.length &&
+      (result.nextMeeting === null) === (nextMeeting === null);
+    const flagged = [
+      ...result.decisions,
+      ...result.commitments,
+      ...result.openQuestions,
+      ...result.blockers,
+      ...(result.nextMeeting ? [result.nextMeeting] : []),
+    ].filter((item) => item.needsReview).length;
     const _receipt: WriteReceipt = {
       changed: true,
       verified: persisted,
-      summary: `Saved ${result.commitments.length} commitments and ${result.decisions.length} decisions; ${flagged} need review.`,
+      summary: `Saved ${result.commitments.length} action items, ${result.decisions.length} decisions, ${result.openQuestions.length} open questions, and ${result.blockers.length} blockers; ${flagged} need review.`,
     };
     return { ...result, replayed: false, _receipt };
   },

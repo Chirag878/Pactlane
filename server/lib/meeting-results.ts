@@ -2,9 +2,11 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import {
+  ANALYSIS_BASES,
   COMMITMENT_PRIORITIES,
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
+  MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
   REVIEW_FLAG_CODES,
   REVIEW_STATES,
@@ -22,6 +24,30 @@ const evidenceResult = z.object({
 const decisionResult = z.object({
   id: z.string(),
   description: z.string(),
+  needsReview: z.boolean(),
+  reviewReason: z.string().nullable(),
+  evidence: z.array(evidenceResult),
+});
+
+const findingResult = z.object({
+  id: z.string(),
+  kind: z.enum(MEETING_FINDING_KINDS),
+  description: z.string(),
+  needsReview: z.boolean(),
+  reviewReason: z.string().nullable(),
+  evidence: z.array(evidenceResult),
+});
+
+const nextMeetingResult = z.object({
+  id: z.string(),
+  proposedDate: z.string().nullable(),
+  statedDateText: z.string().nullable(),
+  dateBasis: z.enum(ANALYSIS_BASES).nullable(),
+  proposedTime: z.string().nullable(),
+  statedTimeText: z.string().nullable(),
+  participants: z.array(z.string()),
+  purpose: z.string().nullable(),
+  unknowns: z.array(z.string()),
   needsReview: z.boolean(),
   reviewReason: z.string().nullable(),
   evidence: z.array(evidenceResult),
@@ -69,6 +95,9 @@ export const meetingResultSchema = z.object({
   analysisSaved: z.boolean(),
   decisions: z.array(decisionResult),
   commitments: z.array(commitmentResult),
+  openQuestions: z.array(findingResult),
+  blockers: z.array(findingResult),
+  nextMeeting: nextMeetingResult.nullable(),
   linkedCommitments: z
     .array(commitmentResult)
     .describe(
@@ -183,47 +212,94 @@ export async function loadMeetingResult(
   const db = getDb();
   const { projectId, id: meetingId } = meeting;
 
-  const [commitments, decisions, commitmentEvidence, decisionEvidence] =
-    await Promise.all([
-      db
-        .select()
-        .from(schema.commitments)
-        .where(
-          and(
-            eq(schema.commitments.projectId, projectId),
-            eq(schema.commitments.originMeetingId, meetingId),
-          ),
+  const [
+    commitments,
+    decisions,
+    findings,
+    nextMeetingRows,
+    commitmentEvidence,
+    decisionEvidence,
+    findingEvidence,
+    nextMeetingEvidence,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(schema.commitments)
+      .where(
+        and(
+          eq(schema.commitments.projectId, projectId),
+          eq(schema.commitments.originMeetingId, meetingId),
         ),
-      db
-        .select()
-        .from(schema.decisions)
-        .where(
-          and(
-            eq(schema.decisions.projectId, projectId),
-            eq(schema.decisions.meetingId, meetingId),
-          ),
+      ),
+    db
+      .select()
+      .from(schema.decisions)
+      .where(
+        and(
+          eq(schema.decisions.projectId, projectId),
+          eq(schema.decisions.meetingId, meetingId),
         ),
-      db
-        .select()
-        .from(schema.commitmentEvidence)
-        .where(
-          and(
-            eq(schema.commitmentEvidence.projectId, projectId),
-            eq(schema.commitmentEvidence.meetingId, meetingId),
-          ),
-        )
-        .orderBy(asc(schema.commitmentEvidence.sourceStart)),
-      db
-        .select()
-        .from(schema.decisionEvidence)
-        .where(
-          and(
-            eq(schema.decisionEvidence.projectId, projectId),
-            eq(schema.decisionEvidence.meetingId, meetingId),
-          ),
-        )
-        .orderBy(asc(schema.decisionEvidence.sourceStart)),
-    ]);
+      ),
+    db
+      .select()
+      .from(schema.meetingFindings)
+      .where(
+        and(
+          eq(schema.meetingFindings.projectId, projectId),
+          eq(schema.meetingFindings.meetingId, meetingId),
+        ),
+      ),
+    db
+      .select()
+      .from(schema.nextMeetingSuggestions)
+      .where(
+        and(
+          eq(schema.nextMeetingSuggestions.projectId, projectId),
+          eq(schema.nextMeetingSuggestions.meetingId, meetingId),
+        ),
+      )
+      .limit(1),
+    db
+      .select()
+      .from(schema.commitmentEvidence)
+      .where(
+        and(
+          eq(schema.commitmentEvidence.projectId, projectId),
+          eq(schema.commitmentEvidence.meetingId, meetingId),
+        ),
+      )
+      .orderBy(asc(schema.commitmentEvidence.sourceStart)),
+    db
+      .select()
+      .from(schema.decisionEvidence)
+      .where(
+        and(
+          eq(schema.decisionEvidence.projectId, projectId),
+          eq(schema.decisionEvidence.meetingId, meetingId),
+        ),
+      )
+      .orderBy(asc(schema.decisionEvidence.sourceStart)),
+    db
+      .select()
+      .from(schema.meetingFindingEvidence)
+      .where(
+        and(
+          eq(schema.meetingFindingEvidence.projectId, projectId),
+          eq(schema.meetingFindingEvidence.meetingId, meetingId),
+        ),
+      )
+      .orderBy(asc(schema.meetingFindingEvidence.sourceStart)),
+    db
+      .select()
+      .from(schema.nextMeetingEvidence)
+      .where(
+        and(
+          eq(schema.nextMeetingEvidence.projectId, projectId),
+          eq(schema.nextMeetingEvidence.meetingId, meetingId),
+        ),
+      )
+      .orderBy(asc(schema.nextMeetingEvidence.sourceStart)),
+  ]);
 
   const originIds = new Set(commitments.map((c) => c.id));
   const linkedIds = [
@@ -272,6 +348,11 @@ export async function loadMeetingResult(
     "commitmentId",
   );
   const evidenceByDecision = groupEvidence(decisionEvidence, "decisionId");
+  const evidenceByFinding = groupEvidence(findingEvidence, "findingId");
+  const evidenceByNextMeeting = groupEvidence(
+    nextMeetingEvidence,
+    "suggestionId",
+  );
   const asResult = (c: Commitment) =>
     toCommitmentResult(
       c,
@@ -298,6 +379,46 @@ export async function loadMeetingResult(
       })),
     ),
     commitments: inTranscriptOrder(commitments.map(asResult)),
+    openQuestions: inTranscriptOrder(
+      findings
+        .filter((finding) => finding.kind === "open_question")
+        .map((finding) => ({
+          id: finding.id,
+          kind: finding.kind,
+          description: finding.description,
+          needsReview: finding.needsReview,
+          reviewReason: finding.reviewReason,
+          evidence: evidenceByFinding.get(finding.id) ?? [],
+        })),
+    ),
+    blockers: inTranscriptOrder(
+      findings
+        .filter((finding) => finding.kind === "blocker")
+        .map((finding) => ({
+          id: finding.id,
+          kind: finding.kind,
+          description: finding.description,
+          needsReview: finding.needsReview,
+          reviewReason: finding.reviewReason,
+          evidence: evidenceByFinding.get(finding.id) ?? [],
+        })),
+    ),
+    nextMeeting: nextMeetingRows[0]
+      ? {
+          id: nextMeetingRows[0].id,
+          proposedDate: nextMeetingRows[0].proposedDate,
+          statedDateText: nextMeetingRows[0].statedDateText,
+          dateBasis: nextMeetingRows[0].dateBasis,
+          proposedTime: nextMeetingRows[0].proposedTime,
+          statedTimeText: nextMeetingRows[0].statedTimeText,
+          participants: nextMeetingRows[0].participants,
+          purpose: nextMeetingRows[0].purpose,
+          unknowns: nextMeetingRows[0].unknowns,
+          needsReview: nextMeetingRows[0].needsReview,
+          reviewReason: nextMeetingRows[0].reviewReason,
+          evidence: evidenceByNextMeeting.get(nextMeetingRows[0].id) ?? [],
+        }
+      : null,
     linkedCommitments: inTranscriptOrder(linkedCommitments.map(asResult)),
   };
 }

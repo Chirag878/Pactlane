@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { ActionCaller } from "@agent-native/core/action";
 import { getDbExec } from "@agent-native/core/db";
 import { runWithRequestContext } from "@agent-native/core/server/request-context";
@@ -71,6 +73,31 @@ interface MeetingOutput {
     reviewReason: string | null;
     evidence: Evidence[];
   }[];
+  openQuestions: FindingOutput[];
+  blockers: FindingOutput[];
+  nextMeeting: {
+    id: string;
+    proposedDate: string | null;
+    statedDateText: string | null;
+    dateBasis: string | null;
+    proposedTime: string | null;
+    statedTimeText: string | null;
+    participants: string[];
+    purpose: string | null;
+    unknowns: string[];
+    needsReview: boolean;
+    reviewReason: string | null;
+    evidence: Evidence[];
+  } | null;
+}
+
+interface FindingOutput {
+  id: string;
+  kind: "open_question" | "blocker";
+  description: string;
+  needsReview: boolean;
+  reviewReason: string | null;
+  evidence: Evidence[];
 }
 
 const newProject = (userEmail = OWNER) =>
@@ -550,6 +577,474 @@ describe("save-analysis: evidence verification", () => {
     expect(saved.needsReview).toBe(true);
     expect(saved.statedOwnerName).toBeNull();
     expect(saved.reviewReason).toContain("No supporting quotation");
+  });
+});
+
+describe("save-analysis: summary-first meeting intelligence", () => {
+  const intelligenceTranscript =
+    "Priya: We still need to decide who leads the demo. Meera: Deployment is blocked until security review. Team: Let's meet again on November 14, 2026 at 10:30 with Priya and Aarav to rehearse the demo.";
+
+  it("persists verified questions, blockers, and a reviewable next meeting", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "The demo lead is unresolved and deployment awaits review.",
+      decisions: [],
+      commitments: [],
+      openQuestions: [
+        {
+          description: "Who will lead the demo?",
+          evidence: [{ quote: "We still need to decide who leads the demo." }],
+          reviewNote: null,
+        },
+      ],
+      blockers: [
+        {
+          description: "Deployment is waiting for security review",
+          evidence: [{ quote: "Deployment is blocked until security review." }],
+          reviewNote: null,
+        },
+      ],
+      nextMeeting: {
+        proposedDate: "2026-11-14",
+        dateText: "November 14, 2026",
+        dateBasis: "explicit",
+        proposedTime: "10:30",
+        timeText: "10:30",
+        participants: ["Priya", "Aarav"],
+        purpose: "Rehearse the demo",
+        unknowns: [],
+        evidence: [
+          {
+            quote:
+              "Let's meet again on November 14, 2026 at 10:30 with Priya and Aarav to rehearse the demo.",
+          },
+        ],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.openQuestions).toHaveLength(1);
+    expect(saved.blockers).toHaveLength(1);
+    expect(saved.openQuestions[0]).toMatchObject({
+      kind: "open_question",
+      needsReview: false,
+    });
+    expect(saved.blockers[0]).toMatchObject({
+      kind: "blocker",
+      needsReview: false,
+    });
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: "2026-11-14",
+      statedDateText: "November 14, 2026",
+      proposedTime: "10:30",
+      statedTimeText: "10:30",
+      participants: ["Priya", "Aarav"],
+      purpose: "Rehearse the demo",
+      needsReview: false,
+    });
+
+    const evidence = [
+      ...saved.openQuestions[0]!.evidence,
+      ...saved.blockers[0]!.evidence,
+      ...saved.nextMeeting!.evidence,
+    ];
+    expect(
+      evidence.every((item) => item.verificationStatus === "verified"),
+    ).toBe(true);
+
+    const changes = await getDb()
+      .select()
+      .from(schema.changes)
+      .where(eq(schema.changes.projectId, project.id));
+    expect(changes.some((change) => change.entityType === "finding")).toBe(
+      true,
+    );
+    expect(changes.some((change) => change.entityType === "next_meeting")).toBe(
+      true,
+    );
+  });
+
+  it("drops unsupported scheduling claims and flags unresolved dates", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "A follow-up was discussed.",
+      decisions: [],
+      commitments: [],
+      nextMeeting: {
+        proposedDate: "2026-11-15",
+        dateText: "November 15, 2026",
+        dateBasis: "explicit",
+        proposedTime: null,
+        timeText: null,
+        participants: ["Jordan"],
+        purpose: "Rehearse the demo",
+        unknowns: ["Final room"],
+        evidence: [
+          {
+            quote:
+              "Let's meet again on November 14, 2026 at 10:30 with Priya and Aarav to rehearse the demo.",
+          },
+        ],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: null,
+      statedDateText: null,
+      participants: [],
+      needsReview: true,
+    });
+    expect(saved.nextMeeting!.reviewReason).toContain("not supported");
+    expect(saved.nextMeeting!.reviewReason).toContain("Jordan");
+  });
+
+  it("keeps a stated but unresolved next-meeting date unknown", async () => {
+    const transcript = "Team: Let's meet again next week.";
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, transcript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "A follow-up was proposed for next week.",
+      decisions: [],
+      commitments: [],
+      nextMeeting: {
+        proposedDate: null,
+        dateText: "next week",
+        dateBasis: null,
+        proposedTime: null,
+        timeText: null,
+        participants: [],
+        purpose: null,
+        unknowns: ["Calendar date", "Time", "Participants"],
+        evidence: [{ quote: "Let's meet again next week." }],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: null,
+      statedDateText: "next week",
+      dateBasis: null,
+      needsReview: true,
+    });
+    expect(saved.nextMeeting!.reviewReason).toContain("no calendar date");
+  });
+
+  it("rejects scheduling values that disagree with the quoted wording", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "A follow-up was proposed.",
+      decisions: [],
+      commitments: [],
+      nextMeeting: {
+        proposedDate: "2026-11-15",
+        dateText: "November 14, 2026",
+        dateBasis: "explicit",
+        proposedTime: "11:30",
+        timeText: "10:30",
+        participants: [],
+        purpose: "Rehearse the demo",
+        unknowns: [],
+        evidence: [
+          {
+            quote:
+              "Let's meet again on November 14, 2026 at 10:30 with Priya and Aarav to rehearse the demo.",
+          },
+        ],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: null,
+      statedDateText: "November 14, 2026",
+      dateBasis: null,
+      proposedTime: null,
+      statedTimeText: "10:30",
+      needsReview: true,
+    });
+    expect(saved.nextMeeting!.reviewReason).toContain("does not match");
+  });
+
+  it("leaves a relative suggested date unresolved", async () => {
+    const transcript = "Team: Let's meet again next week.";
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, transcript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "A follow-up was proposed for next week.",
+      decisions: [],
+      commitments: [],
+      nextMeeting: {
+        proposedDate: "2026-11-16",
+        dateText: "next week",
+        dateBasis: "inferred",
+        proposedTime: null,
+        timeText: null,
+        participants: [],
+        purpose: null,
+        unknowns: ["Calendar date", "Time", "Participants"],
+        evidence: [{ quote: "Let's meet again next week." }],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: null,
+      statedDateText: "next week",
+      dateBasis: null,
+      needsReview: true,
+    });
+    expect(saved.nextMeeting!.reviewReason).toContain("remains unresolved");
+  });
+
+  it("keeps older analyzed meetings with no summary compatible", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id);
+    await getDb()
+      .update(schema.meetings)
+      .set({
+        analysisHash: "legacy-analysis-hash",
+        processingStatus: "processed",
+        summary: null,
+      })
+      .where(eq(schema.meetings.id, meeting.id));
+
+    const read = await call<MeetingOutput>(getMeeting, { id: meeting.id });
+    expect(read).toMatchObject({
+      analysisSaved: true,
+      summary: null,
+      openQuestions: [],
+      blockers: [],
+      nextMeeting: null,
+    });
+  });
+
+  it("does not duplicate new structured results on an identical retry", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const analysis = {
+      meetingId: meeting.id,
+      summary: "The demo lead remains open.",
+      decisions: [],
+      commitments: [],
+      openQuestions: [
+        {
+          description: "Who will lead the demo?",
+          evidence: [{ quote: "We still need to decide who leads the demo." }],
+          reviewNote: null,
+        },
+      ],
+      blockers: [],
+      nextMeeting: null,
+    };
+
+    await call<MeetingOutput>(saveAnalysis, analysis);
+    const replay = await call<MeetingOutput>(saveAnalysis, analysis);
+    const findings = await getDb()
+      .select()
+      .from(schema.meetingFindings)
+      .where(eq(schema.meetingFindings.meetingId, meeting.id));
+    const suggestions = await getDb()
+      .select()
+      .from(schema.nextMeetingSuggestions)
+      .where(eq(schema.nextMeetingSuggestions.meetingId, meeting.id));
+
+    expect(replay.replayed).toBe(true);
+    expect(findings).toHaveLength(1);
+    expect(suggestions).toHaveLength(0);
+  });
+
+  it("keeps the pre-upgrade hash so an already-saved meeting still replays", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    // The exact serialization older versions hashed: no new fields.
+    const legacyHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          meetingId: meeting.id,
+          summary: "Older analysis.",
+          decisions: [],
+          commitments: [],
+        }),
+      )
+      .digest("hex");
+
+    // An older caller omits every new field and gets that same hash.
+    const legacyInput = {
+      meetingId: meeting.id,
+      summary: "Older analysis.",
+      decisions: [],
+      commitments: [],
+    };
+    const first = await call<MeetingOutput>(saveAnalysis, legacyInput);
+    const [stored] = await getDb()
+      .select({ hash: schema.meetings.analysisHash })
+      .from(schema.meetings)
+      .where(eq(schema.meetings.id, meeting.id));
+    expect(first.replayed).toBe(false);
+    expect(stored!.hash).toBe(legacyHash);
+
+    // A meeting saved before the upgrade has only the old hash on record.
+    const preUpgrade = await newMeeting(project.id, intelligenceTranscript);
+    const preUpgradeHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          meetingId: preUpgrade.id,
+          summary: "Older analysis.",
+          decisions: [],
+          commitments: [],
+        }),
+      )
+      .digest("hex");
+    await getDb()
+      .update(schema.meetings)
+      .set({
+        analysisHash: preUpgradeHash,
+        processingStatus: "processed",
+        summary: "Older analysis.",
+      })
+      .where(eq(schema.meetings.id, preUpgrade.id));
+
+    const same = await call<MeetingOutput>(saveAnalysis, {
+      ...legacyInput,
+      meetingId: preUpgrade.id,
+    });
+    const explicitEmpty = await call<MeetingOutput>(saveAnalysis, {
+      ...legacyInput,
+      meetingId: preUpgrade.id,
+      openQuestions: [],
+      blockers: [],
+      nextMeeting: null,
+    });
+    expect(same.replayed).toBe(true);
+    expect(explicitEmpty.replayed).toBe(true);
+
+    // Adding new findings is a different analysis and must not be merged in.
+    const error = await rejection(
+      call(saveAnalysis, {
+        ...legacyInput,
+        meetingId: preUpgrade.id,
+        blockers: [
+          {
+            description: "Deployment is waiting for security review",
+            evidence: [
+              { quote: "Deployment is blocked until security review." },
+            ],
+            reviewNote: null,
+          },
+        ],
+      }),
+    );
+    expect(error).toMatchObject({
+      errorCode: "analysis_already_saved",
+      statusCode: 409,
+    });
+    const read = await call<MeetingOutput>(getMeeting, { id: preUpgrade.id });
+    expect(read).toMatchObject({
+      summary: "Older analysis.",
+      blockers: [],
+      openQuestions: [],
+      nextMeeting: null,
+    });
+  });
+
+  it("flags findings and suggestions whose evidence is missing or absent", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const saved = await call<MeetingOutput>(saveAnalysis, {
+      meetingId: meeting.id,
+      summary: "Questions were raised.",
+      decisions: [],
+      commitments: [],
+      openQuestions: [
+        {
+          description: "Who owns the budget?",
+          evidence: [{ quote: "Who owns the budget for the demo?" }],
+          reviewNote: null,
+        },
+      ],
+      blockers: [
+        {
+          description: "A vendor delay",
+          evidence: [],
+          reviewNote: null,
+        },
+      ],
+      nextMeeting: {
+        proposedDate: "2026-11-14",
+        dateText: "November 14, 2026",
+        dateBasis: "explicit",
+        proposedTime: null,
+        timeText: null,
+        participants: [],
+        purpose: null,
+        unknowns: [],
+        evidence: [],
+        reviewNote: null,
+      },
+    });
+
+    expect(saved.openQuestions[0]).toMatchObject({ needsReview: true });
+    expect(saved.openQuestions[0]!.evidence[0]!.verificationStatus).toBe(
+      "missing",
+    );
+    expect(saved.openQuestions[0]!.reviewReason).toContain(
+      "not found in the transcript",
+    );
+    expect(saved.blockers[0]).toMatchObject({
+      needsReview: true,
+      evidence: [],
+    });
+    expect(saved.blockers[0]!.reviewReason).toContain(
+      "No supporting quotation",
+    );
+    // A date that no verified quotation contains is not kept.
+    expect(saved.nextMeeting).toMatchObject({
+      proposedDate: null,
+      statedDateText: null,
+      needsReview: true,
+    });
+    expect(saved.nextMeeting!.reviewReason).toContain(
+      "No supporting quotation",
+    );
+  });
+
+  it("does not expose a summary or findings to a user without access", async () => {
+    const project = await newProject();
+    const meeting = await newMeeting(project.id, intelligenceTranscript);
+    const analysis = {
+      meetingId: meeting.id,
+      summary: "Confidential summary text.",
+      decisions: [],
+      commitments: [],
+      openQuestions: [
+        {
+          description: "Who will lead the demo?",
+          evidence: [{ quote: "We still need to decide who leads the demo." }],
+          reviewNote: null,
+        },
+      ],
+      blockers: [],
+      nextMeeting: null,
+    };
+    await call(saveAnalysis, analysis);
+
+    const denied = await rejection(call(getMeeting, { id: meeting.id }, OTHER));
+    expect(denied).toMatchObject({ errorCode: "access_denied" });
+    expect(JSON.stringify(denied)).not.toContain("Confidential");
+
+    // Replaying the identical analysis as another user must not reveal it either.
+    const deniedReplay = await rejection(call(saveAnalysis, analysis, OTHER));
+    expect(deniedReplay).toMatchObject({ errorCode: "access_denied" });
+    expect(JSON.stringify(deniedReplay)).not.toContain("Confidential");
   });
 });
 

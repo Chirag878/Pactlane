@@ -10,6 +10,7 @@ import {
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
   FOLLOWUP_STATUSES,
+  MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
   PROJECT_VISIBILITIES,
   REVIEW_STATES,
@@ -102,6 +103,10 @@ describe("foundation migration", () => {
       schema.commitmentLinkDismissals,
       schema.decisions,
       schema.decisionEvidence,
+      schema.meetingFindings,
+      schema.meetingFindingEvidence,
+      schema.nextMeetingSuggestions,
+      schema.nextMeetingEvidence,
       schema.changes,
       schema.followups,
     ];
@@ -131,6 +136,15 @@ describe("foundation migration", () => {
     ],
     [
       "decision_evidence_verification_status_check",
+      EVIDENCE_VERIFICATION_STATUSES,
+    ],
+    ["meeting_findings_kind_check", MEETING_FINDING_KINDS],
+    [
+      "meeting_finding_evidence_verification_status_check",
+      EVIDENCE_VERIFICATION_STATUSES,
+    ],
+    [
+      "next_meeting_evidence_verification_status_check",
       EVIDENCE_VERIFICATION_STATUSES,
     ],
     ["changes_entity_type_check", CHANGE_ENTITY_TYPES],

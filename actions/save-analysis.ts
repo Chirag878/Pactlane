@@ -335,6 +335,7 @@ export default defineAction({
             priority: c.priority,
             needsReview: c.needsReview,
             reviewReason: c.reviewReason,
+            reviewFlags: c.reviewFlags.map((f) => f.code),
           }),
         ),
         ...[...decisionEvidence, ...commitmentEvidence].map((e) =>

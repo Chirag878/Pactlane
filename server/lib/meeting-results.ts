@@ -6,6 +6,8 @@ import {
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
   MEETING_PROCESSING_STATUSES,
+  REVIEW_FLAG_CODES,
+  REVIEW_STATES,
 } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
 
@@ -25,8 +27,18 @@ const decisionResult = z.object({
   evidence: z.array(evidenceResult),
 });
 
-const commitmentResult = z.object({
+const reviewFlagResult = z.object({
+  code: z.enum(REVIEW_FLAG_CODES),
+  message: z.string(),
+});
+
+export const commitmentResult = z.object({
   id: z.string(),
+  projectId: z.string(),
+  originMeetingId: z.string().nullable(),
+  version: z
+    .number()
+    .describe("Pass as expectedVersion when updating or reviewing"),
   description: z.string(),
   ownerId: z.string().nullable(),
   ownerDisplayName: z.string().nullable(),
@@ -37,8 +49,14 @@ const commitmentResult = z.object({
   status: z.enum(COMMITMENT_STATUSES),
   needsReview: z.boolean(),
   reviewReason: z.string().nullable(),
+  reviewFlags: z.array(reviewFlagResult),
+  reviewState: z.enum(REVIEW_STATES),
+  reviewedBy: z.string().nullable(),
+  reviewedAt: z.string().nullable(),
   evidence: z.array(evidenceResult),
 });
+
+export type CommitmentResult = z.infer<typeof commitmentResult>;
 
 export const meetingResultSchema = z.object({
   id: z.string(),
@@ -51,10 +69,16 @@ export const meetingResultSchema = z.object({
   analysisSaved: z.boolean(),
   decisions: z.array(decisionResult),
   commitments: z.array(commitmentResult),
+  linkedCommitments: z
+    .array(commitmentResult)
+    .describe(
+      "Earlier commitments a person linked to this meeting. Evidence shown is from this meeting only",
+    ),
 });
 
 export type MeetingResult = z.infer<typeof meetingResultSchema>;
 type Meeting = typeof schema.meetings.$inferSelect;
+type Commitment = typeof schema.commitments.$inferSelect;
 type EvidenceResult = z.infer<typeof evidenceResult>;
 
 /** Transcript order, because every row of one save shares a timestamp. */
@@ -85,6 +109,71 @@ function groupEvidence<K extends string>(
     grouped.set(row[key], list);
   }
   return grouped;
+}
+
+export function toCommitmentResult(
+  c: Commitment,
+  ownerDisplayName: string | null,
+  evidence: EvidenceResult[],
+): CommitmentResult {
+  return {
+    id: c.id,
+    projectId: c.projectId,
+    originMeetingId: c.originMeetingId,
+    version: c.version,
+    description: c.description,
+    ownerId: c.ownerId,
+    ownerDisplayName,
+    statedOwnerName: c.statedOwnerName,
+    dueDate: c.dueDate,
+    statedDueText: c.statedDueText,
+    priority: c.priority,
+    status: c.status,
+    needsReview: c.needsReview,
+    reviewReason: c.reviewReason,
+    reviewFlags: c.reviewFlags,
+    reviewState: c.reviewState,
+    reviewedBy: c.reviewedBy,
+    reviewedAt: c.reviewedAt ? c.reviewedAt.toISOString() : null,
+    evidence,
+  };
+}
+
+/** Reads one commitment with its owner name and evidence, in the shape get-meeting returns. */
+export async function loadCommitmentResult(
+  commitment: Commitment,
+): Promise<CommitmentResult> {
+  const db = getDb();
+  const { projectId } = commitment;
+  const [evidence, owner] = await Promise.all([
+    db
+      .select()
+      .from(schema.commitmentEvidence)
+      .where(
+        and(
+          eq(schema.commitmentEvidence.projectId, projectId),
+          eq(schema.commitmentEvidence.commitmentId, commitment.id),
+        ),
+      )
+      .orderBy(asc(schema.commitmentEvidence.sourceStart)),
+    commitment.ownerId
+      ? db
+          .select({ displayName: schema.people.displayName })
+          .from(schema.people)
+          .where(
+            and(
+              eq(schema.people.projectId, projectId),
+              eq(schema.people.id, commitment.ownerId),
+            ),
+          )
+          .limit(1)
+      : Promise.resolve([]),
+  ]);
+  return toCommitmentResult(
+    commitment,
+    owner[0]?.displayName ?? null,
+    groupEvidence(evidence, "commitmentId").get(commitment.id) ?? [],
+  );
 }
 
 /** Call only after authorizing the caller against the meeting's project. */
@@ -136,8 +225,32 @@ export async function loadMeetingResult(
         .orderBy(asc(schema.decisionEvidence.sourceStart)),
     ]);
 
+  const originIds = new Set(commitments.map((c) => c.id));
+  const linkedIds = [
+    ...new Set(
+      commitmentEvidence
+        .map((e) => e.commitmentId)
+        .filter((id) => !originIds.has(id)),
+    ),
+  ];
+  const linkedCommitments = linkedIds.length
+    ? await db
+        .select()
+        .from(schema.commitments)
+        .where(
+          and(
+            eq(schema.commitments.projectId, projectId),
+            inArray(schema.commitments.id, linkedIds),
+          ),
+        )
+    : [];
+
   const ownerIds = [
-    ...new Set(commitments.flatMap((c) => (c.ownerId ? [c.ownerId] : []))),
+    ...new Set(
+      [...commitments, ...linkedCommitments].flatMap((c) =>
+        c.ownerId ? [c.ownerId] : [],
+      ),
+    ),
   ];
   const owners = ownerIds.length
     ? await db
@@ -159,6 +272,12 @@ export async function loadMeetingResult(
     "commitmentId",
   );
   const evidenceByDecision = groupEvidence(decisionEvidence, "decisionId");
+  const asResult = (c: Commitment) =>
+    toCommitmentResult(
+      c,
+      c.ownerId ? (ownerNames.get(c.ownerId) ?? null) : null,
+      evidenceByCommitment.get(c.id) ?? [],
+    );
 
   return {
     id: meetingId,
@@ -178,23 +297,7 @@ export async function loadMeetingResult(
         evidence: evidenceByDecision.get(d.id) ?? [],
       })),
     ),
-    commitments: inTranscriptOrder(
-      commitments.map((c) => ({
-        id: c.id,
-        description: c.description,
-        ownerId: c.ownerId,
-        ownerDisplayName: c.ownerId
-          ? (ownerNames.get(c.ownerId) ?? null)
-          : null,
-        statedOwnerName: c.statedOwnerName,
-        dueDate: c.dueDate,
-        statedDueText: c.statedDueText,
-        priority: c.priority,
-        status: c.status,
-        needsReview: c.needsReview,
-        reviewReason: c.reviewReason,
-        evidence: evidenceByCommitment.get(c.id) ?? [],
-      })),
-    ),
+    commitments: inTranscriptOrder(commitments.map(asResult)),
+    linkedCommitments: inTranscriptOrder(linkedCommitments.map(asResult)),
   };
 }

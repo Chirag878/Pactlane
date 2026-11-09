@@ -11,6 +11,8 @@ export default defineConfig({
   },
   test: {
     env: { DATABASE_URL: "pglite:memory" },
+    // Each test file starts its own in-memory database, which is memory hungry.
+    maxWorkers: 2,
     exclude: [
       "**/node_modules/**",
       "**/.git/**",

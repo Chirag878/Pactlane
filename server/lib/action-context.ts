@@ -70,3 +70,17 @@ export async function authorizeMeeting(meetingId: string, role: ProjectRole) {
   await authorizeProject(meeting.projectId, role);
   return meeting;
 }
+
+export async function authorizeCommitment(
+  commitmentId: string,
+  role: ProjectRole,
+) {
+  const [commitment] = await getDb()
+    .select()
+    .from(schema.commitments)
+    .where(eq(schema.commitments.id, commitmentId))
+    .limit(1);
+  if (!commitment) denyAccess();
+  await authorizeProject(commitment.projectId, role);
+  return commitment;
+}

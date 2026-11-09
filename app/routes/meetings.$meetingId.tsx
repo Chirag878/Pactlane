@@ -22,6 +22,7 @@ import {
 import { TranscriptPanel } from "@/components/meetings/TranscriptPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export function meta() {
@@ -41,6 +42,10 @@ export default function MeetingRoute() {
     searchParams.get("highlight"),
   );
   const [inspected, setInspected] = useState<InspectRange | null>(null);
+  // A source link (?highlight=) must open on the transcript it points into.
+  const [mobileView, setMobileView] = useState<"analysis" | "transcript">(
+    searchParams.get("highlight") ? "transcript" : "analysis",
+  );
   const transcriptRef = useRef<HTMLDivElement | null>(null);
 
   const {
@@ -62,6 +67,17 @@ export default function MeetingRoute() {
         ...meeting.decisions,
         ...meeting.commitments,
         ...meeting.linkedCommitments,
+        ...meeting.openQuestions,
+        ...meeting.blockers,
+        ...(meeting.nextMeeting
+          ? [
+              {
+                ...meeting.nextMeeting,
+                description:
+                  meeting.nextMeeting.purpose ?? "Next meeting suggestion",
+              },
+            ]
+          : []),
       ].find((item) => item.id === selectedId) ?? null
     );
   }, [meeting, selectedId]);
@@ -93,8 +109,16 @@ export default function MeetingRoute() {
   }
   if (isLoading || !meeting) {
     return (
-      <div className="mx-auto w-full max-w-3xl p-6">
-        <p className="text-sm text-muted-foreground">Loading…</p>
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
+        <Skeleton className="h-5 w-28" />
+        <div className="space-y-3">
+          <Skeleton className="h-8 w-2/3 max-w-md" />
+          <Skeleton className="h-4 w-48" />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-72 w-full" />
+        </div>
       </div>
     );
   }
@@ -120,10 +144,13 @@ export default function MeetingRoute() {
     setAnalysisState("idle");
   }
 
-  // On a narrow screen the transcript sits below, so bring it into view.
+  // On a narrow screen switch to the transcript before bringing it into view.
   function revealTranscript() {
     if (!window.matchMedia("(min-width: 1024px)").matches) {
-      transcriptRef.current?.scrollIntoView({ block: "start" });
+      setMobileView("transcript");
+      requestAnimationFrame(() =>
+        transcriptRef.current?.scrollIntoView({ block: "start" }),
+      );
     }
   }
 
@@ -134,38 +161,74 @@ export default function MeetingRoute() {
     if (!same) revealTranscript();
   }
 
-  const items = [...meeting.decisions, ...meeting.commitments];
+  const items = [
+    ...meeting.decisions,
+    ...meeting.commitments,
+    ...meeting.openQuestions,
+    ...meeting.blockers,
+    ...(meeting.nextMeeting ? [meeting.nextMeeting] : []),
+  ];
   const pending = items.filter((item) => item.needsReview).length;
   // A rejected commitment no longer asks for attention, so its quotations are not counted.
   const unverified = [
     ...meeting.decisions,
     ...meeting.commitments.filter((c) => c.reviewState !== "rejected"),
+    ...meeting.openQuestions,
+    ...meeting.blockers,
+    ...(meeting.nextMeeting ? [meeting.nextMeeting] : []),
   ]
     .flatMap((item) => item.evidence)
     .filter((e) => e.verificationStatus !== "verified").length;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6">
-      <header className="flex flex-col gap-1">
+    <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 p-4 sm:p-6">
+      <header className="flex flex-col gap-3 border-b pb-5">
         <Link
           to={`/projects/${meeting.projectId}`}
           className="text-sm text-muted-foreground hover:underline"
         >
           Back to project
         </Link>
-        <h1 className="text-xl font-semibold">{meeting.title}</h1>
-        <p className="text-sm text-muted-foreground">{meeting.meetingDate}</p>
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {meeting.title}
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {meeting.meetingDate} · Participants not recorded
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={meeting.analysisSaved ? "secondary" : "outline"}>
+              {meeting.analysisSaved ? "AI analysis saved" : "Not analyzed"}
+            </Badge>
+            {meeting.analysisSaved ? (
+              <Badge variant="outline">
+                {pending > 0 ? `${pending} need review` : "Review clear"}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
       </header>
 
       {meeting.analysisSaved ? (
         <section
           aria-labelledby="overview-heading"
-          className="flex flex-col gap-3"
+          className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6"
         >
-          <h2 id="overview-heading" className="text-base font-semibold">
-            Overview
-          </h2>
-          <p className="max-w-3xl text-sm">{meeting.summary}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 id="overview-heading" className="text-lg font-semibold">
+              Summary
+            </h2>
+            <Badge variant="outline">AI-generated · review advised</Badge>
+          </div>
+          <div className="max-w-4xl space-y-3 text-sm leading-relaxed sm:text-base">
+            {(meeting.summary ?? "No summary was saved.")
+              .split(/\n\s*\n/)
+              .map((paragraph, index) => (
+                <p key={index}>{paragraph}</p>
+              ))}
+          </div>
           <p
             role="status"
             className={cn(
@@ -182,10 +245,36 @@ export default function MeetingRoute() {
         </section>
       ) : null}
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:items-start">
+      <div
+        className="grid grid-cols-2 rounded-lg border p-1 lg:hidden"
+        aria-label="Meeting workspace view"
+      >
+        <Button
+          type="button"
+          variant={mobileView === "analysis" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setMobileView("analysis")}
+        >
+          Analysis
+        </Button>
+        <Button
+          type="button"
+          variant={mobileView === "transcript" ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setMobileView("transcript")}
+        >
+          Transcript
+        </Button>
+      </div>
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)] lg:items-start">
         <div
           ref={transcriptRef}
-          className="order-2 scroll-mt-4 lg:sticky lg:top-6 lg:order-1"
+          className={cn(
+            "order-2 scroll-mt-4",
+            mobileView === "transcript" ? "block" : "hidden",
+            "lg:sticky lg:top-6 lg:order-2 lg:block",
+          )}
         >
           <TranscriptPanel
             transcript={meeting.transcript ?? ""}
@@ -198,24 +287,32 @@ export default function MeetingRoute() {
           />
         </div>
 
-        <div className="order-1 flex flex-col gap-8 lg:order-2">
+        <div
+          className={cn(
+            "order-1 flex-col gap-8",
+            mobileView === "analysis" ? "flex" : "hidden",
+            "lg:order-1 lg:flex",
+          )}
+        >
           {meeting.transcript ? (
-            <LinkReviewPanel
-              meetingId={meeting.id}
-              projectId={meeting.projectId}
-              meetingDate={meeting.meetingDate}
-              onInspect={(range) => {
-                setSelectedId(null);
-                setInspected(range);
-                revealTranscript();
-              }}
-            />
+            <div className="order-8">
+              <LinkReviewPanel
+                meetingId={meeting.id}
+                projectId={meeting.projectId}
+                meetingDate={meeting.meetingDate}
+                onInspect={(range) => {
+                  setSelectedId(null);
+                  setInspected(range);
+                  revealTranscript();
+                }}
+              />
+            </div>
           ) : null}
 
           {meeting.linkedCommitments.length > 0 ? (
             <section
               aria-labelledby="linked-heading"
-              className="flex flex-col gap-3"
+              className="order-7 flex flex-col gap-3"
             >
               <h2 id="linked-heading" className="text-base font-semibold">
                 Earlier commitments discussed here
@@ -258,7 +355,7 @@ export default function MeetingRoute() {
             <>
               <section
                 aria-labelledby="decisions-heading"
-                className="flex flex-col gap-3"
+                className="order-2 flex flex-col gap-3"
               >
                 <h2 id="decisions-heading" className="text-base font-semibold">
                   Decisions
@@ -315,13 +412,13 @@ export default function MeetingRoute() {
 
               <section
                 aria-labelledby="commitments-heading"
-                className="flex flex-col gap-3"
+                className="order-1 flex flex-col gap-3"
               >
                 <h2
                   id="commitments-heading"
                   className="text-base font-semibold"
                 >
-                  Commitments
+                  Action items
                 </h2>
                 {meeting.commitments.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -338,6 +435,170 @@ export default function MeetingRoute() {
                       onReloadLatest={() => void refetch()}
                     />
                   ))
+                )}
+              </section>
+
+              {[
+                {
+                  id: "questions",
+                  title: "Open questions",
+                  empty: "No open questions recorded.",
+                  items: meeting.openQuestions,
+                  order: "order-3",
+                },
+                {
+                  id: "blockers",
+                  title: "Blockers and risks",
+                  empty: "No blockers or risks recorded.",
+                  items: meeting.blockers,
+                  order: "order-4",
+                },
+              ].map((section) => (
+                <section
+                  key={section.id}
+                  aria-labelledby={`${section.id}-heading`}
+                  className={cn("flex flex-col gap-3", section.order)}
+                >
+                  <h2
+                    id={`${section.id}-heading`}
+                    className="text-base font-semibold"
+                  >
+                    {section.title}
+                  </h2>
+                  {section.items.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {section.empty}
+                    </p>
+                  ) : (
+                    section.items.map((item) => {
+                      const evidence = summarizeEvidence(item.evidence);
+                      const isSelected = selectedId === item.id;
+                      return (
+                        <article
+                          key={item.id}
+                          className={cn(
+                            "flex flex-col gap-2 rounded-lg border p-4",
+                            isSelected && "border-primary/60 bg-primary/[0.03]",
+                          )}
+                        >
+                          <h3 className="text-sm font-medium">
+                            <button
+                              type="button"
+                              aria-pressed={isSelected}
+                              className="text-start hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              onClick={() => select(item.id)}
+                            >
+                              {item.description}
+                            </button>
+                          </h3>
+                          <div className="flex flex-wrap gap-1.5">
+                            <Badge variant={evidence.variant}>
+                              {evidence.label}
+                            </Badge>
+                            {item.needsReview ? (
+                              <Badge
+                                variant="outline"
+                                className="border-amber-500/60 text-amber-700 dark:text-amber-400"
+                              >
+                                Needs review
+                              </Badge>
+                            ) : null}
+                          </div>
+                          {item.reviewReason ? (
+                            <p className="text-sm text-muted-foreground">
+                              {item.reviewReason}
+                            </p>
+                          ) : null}
+                          <EvidenceList evidence={item.evidence} />
+                        </article>
+                      );
+                    })
+                  )}
+                </section>
+              ))}
+
+              <section
+                aria-labelledby="next-meeting-heading"
+                className="order-5 flex flex-col gap-3"
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2
+                    id="next-meeting-heading"
+                    className="text-base font-semibold"
+                  >
+                    Next meeting suggestion
+                  </h2>
+                  <Badge variant="outline">Review before scheduling</Badge>
+                </div>
+                {meeting.nextMeeting ? (
+                  <article
+                    className={cn(
+                      "flex flex-col gap-3 rounded-lg border p-4",
+                      selectedId === meeting.nextMeeting.id &&
+                        "border-primary/60 bg-primary/[0.03]",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      aria-pressed={selectedId === meeting.nextMeeting.id}
+                      className="text-start text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => select(meeting.nextMeeting!.id)}
+                    >
+                      {meeting.nextMeeting.purpose ??
+                        "Follow-up meeting purpose not stated"}
+                    </button>
+                    <dl className="grid gap-3 text-sm sm:grid-cols-3">
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Date
+                        </dt>
+                        <dd className="mt-1">
+                          {meeting.nextMeeting.proposedDate ??
+                            meeting.nextMeeting.statedDateText ??
+                            "Unknown"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Time
+                        </dt>
+                        <dd className="mt-1">
+                          {meeting.nextMeeting.proposedTime ??
+                            meeting.nextMeeting.statedTimeText ??
+                            "Unknown"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Participants
+                        </dt>
+                        <dd className="mt-1">
+                          {meeting.nextMeeting.participants.length > 0
+                            ? meeting.nextMeeting.participants.join(", ")
+                            : "Unknown"}
+                        </dd>
+                      </div>
+                    </dl>
+                    {meeting.nextMeeting.unknowns.length > 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        Still unknown: {meeting.nextMeeting.unknowns.join(", ")}
+                      </p>
+                    ) : null}
+                    {meeting.nextMeeting.reviewReason ? (
+                      <p className="text-sm">
+                        {meeting.nextMeeting.reviewReason}
+                      </p>
+                    ) : null}
+                    <EvidenceList evidence={meeting.nextMeeting.evidence} />
+                    <p className="text-xs text-muted-foreground">
+                      This is a saved suggestion only. No calendar event has
+                      been created.
+                    </p>
+                  </article>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No follow-up meeting was suggested in the analysis.
+                  </p>
                 )}
               </section>
             </>

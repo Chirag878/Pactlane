@@ -4,11 +4,13 @@ import {
 } from "@agent-native/core/client/agent-chat";
 import {
   actionErrorMessage,
+  useActionMutation,
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { buildSettingsRoute } from "@agent-native/core/client/navigation";
 import { useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
+import { toast } from "sonner";
 
 import { CommitmentCard } from "@/components/meetings/CommitmentCard";
 import {
@@ -42,6 +44,8 @@ export default function MeetingRoute() {
     searchParams.get("highlight"),
   );
   const [inspected, setInspected] = useState<InspectRange | null>(null);
+  const [publishConfirmationOpen, setPublishConfirmationOpen] = useState(false);
+  const [publishProblem, setPublishProblem] = useState<string | null>(null);
   // A source link (?highlight=) must open on the transcript it points into.
   const [mobileView, setMobileView] = useState<"analysis" | "transcript">(
     searchParams.get("highlight") ? "transcript" : "analysis",
@@ -59,6 +63,34 @@ export default function MeetingRoute() {
     { projectId: meeting?.projectId ?? "" },
     { enabled: Boolean(meeting) },
   );
+  const publish = useActionMutation("publish-meeting-analysis", {
+    onSuccess: (result) => {
+      setPublishConfirmationOpen(false);
+      setPublishProblem(null);
+      void refetch();
+      toast.success(
+        result.changed
+          ? "Meeting analysis published."
+          : "Meeting analysis is already published.",
+      );
+    },
+    onError: (error) => {
+      if (
+        (error as { errorCode?: unknown } | null)?.errorCode ===
+        "analysis_revision_conflict"
+      ) {
+        setPublishConfirmationOpen(false);
+        setPublishProblem(
+          "This draft changed after you opened the confirmation. Review the latest analysis before publishing.",
+        );
+        void refetch();
+        return;
+      }
+      setPublishProblem(
+        actionErrorMessage(error) ?? "Could not publish this meeting analysis.",
+      );
+    },
+  });
 
   const selected = useMemo(() => {
     if (!meeting || !selectedId) return null;
@@ -161,6 +193,7 @@ export default function MeetingRoute() {
     if (!same) revealTranscript();
   }
 
+  const visibleAnalysis = meeting.analysisSaved && meeting.analysisVisible;
   const items = [
     ...meeting.decisions,
     ...meeting.commitments,
@@ -199,10 +232,14 @@ export default function MeetingRoute() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Badge variant={meeting.analysisSaved ? "secondary" : "outline"}>
-              {meeting.analysisSaved ? "AI analysis saved" : "Not analyzed"}
+            <Badge variant={visibleAnalysis ? "secondary" : "outline"}>
+              {!meeting.analysisSaved
+                ? "Not analyzed"
+                : meeting.analysisPublicationState === "draft"
+                  ? "Draft analysis"
+                  : "Published analysis"}
             </Badge>
-            {meeting.analysisSaved ? (
+            {visibleAnalysis ? (
               <Badge variant="outline">
                 {pending > 0 ? `${pending} need review` : "Review clear"}
               </Badge>
@@ -211,7 +248,7 @@ export default function MeetingRoute() {
         </div>
       </header>
 
-      {meeting.analysisSaved ? (
+      {visibleAnalysis ? (
         <section
           aria-labelledby="overview-heading"
           className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:p-6"
@@ -220,8 +257,19 @@ export default function MeetingRoute() {
             <h2 id="overview-heading" className="text-lg font-semibold">
               Summary
             </h2>
-            <Badge variant="outline">AI-generated · review advised</Badge>
+            <Badge variant="outline">
+              {meeting.analysisPublicationState === "draft"
+                ? "AI-generated draft · editor review required"
+                : "Published after human review"}
+            </Badge>
           </div>
+          {meeting.analysisPublicationState === "published" ? (
+            <p className="text-xs text-muted-foreground">
+              {meeting.analysisPublishedBy && meeting.analysisPublishedAt
+                ? `Published by ${meeting.analysisPublishedBy} on ${new Date(meeting.analysisPublishedAt).toLocaleString()}.`
+                : "Published before review attribution was tracked."}
+            </p>
+          ) : null}
           <div className="max-w-4xl space-y-3 text-sm leading-relaxed sm:text-base">
             {(meeting.summary ?? "No summary was saved.")
               .split(/\n\s*\n/)
@@ -242,6 +290,74 @@ export default function MeetingRoute() {
               ? `${pending} item${pending === 1 ? "" : "s"} need review, ${unverified} quotation${unverified === 1 ? "" : "s"} not verified against the transcript.`
               : "Everything here has verified evidence and nothing needs review."}
           </p>
+          {meeting.analysisPublicationState === "draft" &&
+          meeting.canPublish ? (
+            <div className="flex flex-col items-start gap-2 border-t pt-4">
+              <p className="text-sm text-muted-foreground">
+                Publishing shares this analysis with project viewers. It does
+                not confirm individual commitments or change evidence
+                verification.
+              </p>
+              {publishProblem ? (
+                <p role="alert" className="text-sm text-destructive">
+                  {publishProblem}
+                </p>
+              ) : null}
+              {publishConfirmationOpen ? (
+                <div
+                  role="dialog"
+                  aria-modal="false"
+                  aria-labelledby="publish-analysis-title"
+                  className="flex w-full max-w-xl flex-col gap-3 rounded-lg border bg-muted/30 p-4"
+                >
+                  <h3
+                    id="publish-analysis-title"
+                    className="text-sm font-medium"
+                  >
+                    Publish this reviewed analysis?
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    The saved summary, decisions, action items, findings, and
+                    suggestion will become visible to project viewers.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setPublishProblem(null);
+                        publish.mutate({
+                          meetingId: meeting.id,
+                          expectedContentRevision:
+                            meeting.analysisContentRevision,
+                        });
+                      }}
+                      disabled={publish.isPending}
+                    >
+                      {publish.isPending ? "Publishing…" : "Publish analysis"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setPublishConfirmationOpen(false);
+                        setPublishProblem(null);
+                      }}
+                      disabled={publish.isPending}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={() => setPublishConfirmationOpen(true)}
+                >
+                  Publish reviewed analysis
+                </Button>
+              )}
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -294,7 +410,7 @@ export default function MeetingRoute() {
             "lg:order-1 lg:flex",
           )}
         >
-          {meeting.transcript ? (
+          {visibleAnalysis && meeting.transcript ? (
             <div className="order-8">
               <LinkReviewPanel
                 meetingId={meeting.id}
@@ -309,7 +425,7 @@ export default function MeetingRoute() {
             </div>
           ) : null}
 
-          {meeting.linkedCommitments.length > 0 ? (
+          {visibleAnalysis && meeting.linkedCommitments.length > 0 ? (
             <section
               aria-labelledby="linked-heading"
               className="order-7 flex flex-col gap-3"
@@ -351,7 +467,7 @@ export default function MeetingRoute() {
             </section>
           ) : null}
 
-          {meeting.analysisSaved ? (
+          {visibleAnalysis ? (
             <>
               <section
                 aria-labelledby="decisions-heading"
@@ -605,17 +721,21 @@ export default function MeetingRoute() {
           ) : (
             <div className="flex flex-col items-start gap-2">
               <p className="text-sm text-muted-foreground">
-                This meeting has not been analyzed yet.
+                {meeting.analysisSaved
+                  ? "This analysis is awaiting an editor’s publication."
+                  : "This meeting has not been analyzed yet."}
               </p>
-              <Button
-                type="button"
-                onClick={requestAnalysis}
-                disabled={analysisState === "checking"}
-              >
-                {analysisState === "checking"
-                  ? "Checking AI setup…"
-                  : "Analyze with AI"}
-              </Button>
+              {meeting.canPublish && !meeting.analysisSaved ? (
+                <Button
+                  type="button"
+                  onClick={requestAnalysis}
+                  disabled={analysisState === "checking"}
+                >
+                  {analysisState === "checking"
+                    ? "Checking AI setup…"
+                    : "Analyze with AI"}
+                </Button>
+              ) : null}
               {analysisState === "missing" ? (
                 <p role="status" className="text-sm text-muted-foreground">
                   AI configuration is required before this meeting can be

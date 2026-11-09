@@ -85,9 +85,11 @@ export default function ProjectRoute() {
                     <span className="flex shrink-0 items-center gap-2 text-muted-foreground">
                       {meeting.meetingDate}
                       <Badge variant="outline">
-                        {meeting.processingStatus === "processed"
-                          ? "Analyzed"
-                          : "Not analyzed"}
+                        {meeting.processingStatus !== "processed"
+                          ? "Not analyzed"
+                          : meeting.analysisPublicationState === "draft"
+                            ? "Draft"
+                            : "Published"}
                       </Badge>
                     </span>
                   </Link>

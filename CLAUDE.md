@@ -4,7 +4,7 @@ Pactlane turns meeting conversations into verifiable commitments and keeps their
 
 ## Pactlane rules
 
-These apply to every turn. Meeting analysis works through the actions below. Cross-meeting commitment matching, commitment editing, undo and follow-ups are not built yet, so never claim they are.
+These apply to every turn. Meeting analysis works through the actions below. A person can correct and review commitments and link a later meeting to an existing commitment. Agent proposals, undo and follow-ups are not built yet, so never claim they are.
 
 ### Accuracy
 
@@ -57,6 +57,13 @@ These apply to every turn. Meeting analysis works through the actions below. Cro
 | `create-meeting` | Store a transcript exactly as given | `projectId`, `title`, `meetingDate`, `transcript` |
 | `get-meeting` | Read a transcript and its saved results | `id` |
 | `save-analysis` | Save a meeting's analysis | `meetingId`, `summary`, `decisions`, `commitments` |
+| `list-people` | See a project's participants | `projectId` |
+| `add-person` | Add a participant the user named | `projectId`, `displayName`, `aliases`, `email` |
+| `update-commitment` | Correct a commitment | `id`, `expectedVersion`, and only the changed fields |
+| `get-commitment-history` | See who changed a commitment and when | `id` |
+| `get-commitment-ledger` | See every commitment in a project with derived health | `projectId`, `asOf` |
+| `get-commitment-trail` | Read one commitment's timeline across meetings | `id`, `asOf` |
+| `find-commitment-candidates` | Find statements that may refer to earlier commitments | `meetingId` |
 
 When asked to analyze a meeting:
 
@@ -69,7 +76,26 @@ When asked to analyze a meeting:
 7. Call `save-analysis` once. Retrying the same analysis is safe, and a different one for an already-saved meeting is refused with `analysis_already_saved`.
 8. Report from the action's result: what was saved, what needs review and which quotations were not verified. Only the server sets verification status.
 
-`save-analysis` saves each meeting on its own. It does not match commitments across meetings, so never say that a commitment was carried over or linked to an earlier one.
+`save-analysis` saves each meeting on its own. It does not match commitments across meetings, so never say that a saved commitment was carried over or linked to an earlier one. Only a person's confirmed link does that.
+
+## Tracking commitments across meetings
+
+1. Before analyzing a later meeting, call `find-commitment-candidates`. A remark about earlier work, such as "the landing page is still unfinished", is not a new promise, so do not save it as a new commitment. Tell the user it may refer to an existing commitment.
+2. Candidates are suggestions from matching words and names. Present them as possibilities with their reasons, never as proof that two things are the same.
+3. You cannot confirm or rule out a link. The server refuses agent callers. Direct the user to the meeting page, where a person decides.
+4. For questions about progress, read `get-commitment-ledger` or `get-commitment-trail` and repeat their `facts`. Overdue, revisited and meeting counts come from those results. Never work them out yourself.
+5. A repeated mention does not prove a missed deadline, a delay or a formal extension. Do not imply work was unfinished on a past date unless the record says so.
+6. You may suggest a correction, such as a new owner or date. Make it through `update-commitment` only when the user asks, and never as a side effect of a link.
+
+## Correcting commitments
+
+AI proposes and a person decides. When the user asks you to change a commitment:
+
+1. Read it with `get-meeting` and use its `version` as `expectedVersion`. Send only the fields the user asked to change. If you get `version_conflict`, read again, tell the user what changed, and do not retry blindly.
+2. Pick an owner only from `list-people`. Add a person with `add-person` only when the user named them. Never guess between two people with similar names.
+3. Your edits are proposals. They do not clear review flags and they withdraw an earlier confirmation. You cannot confirm, reject or restore a commitment: the review action is for a signed-in person only.
+4. Evidence verification and human confirmation are different. A person accepting a commitment never makes a missing quotation verified, so never describe it that way. Quote the verification status that `get-meeting` returns.
+5. Say a change succeeded only when the action result confirms it. An update that changes nothing reports `changed: false` and writes no history.
 
 ## Pactlane engineering rules
 

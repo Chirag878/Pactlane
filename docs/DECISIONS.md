@@ -121,3 +121,35 @@ Lightweight records. Add new entries at the end. To reverse a decision, add a ne
 - **Alternatives:** Creating a person for each stated name, which risks duplicates and silent assignment.
 - **Consequences:** In a project with no people, commitments show the stated name without an owner link until people can be managed.
 - **Status:** Accepted
+
+## ADR-016: Human confirmation is separate from evidence verification
+
+- **Context:** A person can accept a commitment whose quotation is not in the transcript, and an agent can propose changes. Merging the two ideas would let approval quietly turn unsupported text into verified evidence.
+- **Decision:** Evidence verification stays server-set and is never touched by editing or review. A person's verdict is `commitments.review_state` with who and when. Reasons for review are structured `review_flags`, and a person accepts them one code at a time. `review-commitment` is refused to agent callers and hidden from the agent, and an agent's edit neither settles a flag nor keeps a confirmation.
+- **Alternatives:** One `needs_review` boolean, which clears every reason at once; letting confirmation upgrade evidence, which breaks ADR-010; a review table with its own state machine, which is more than this needs.
+- **Consequences:** A confirmed commitment can still show "Not found in transcript". Decisions have flags but no review action yet.
+- **Status:** Accepted
+
+## ADR-017: A version column guards commitment edits
+
+- **Context:** A person and an agent can edit the same commitment, and a form can be open for a long time. Last write wins would discard work silently.
+- **Decision:** `commitments.version` is sent back as `expectedVersion`, and the write is a compare-and-set in the same transaction as its `changes` row. A stale write gets `version_conflict` with the current commitment. A no-op neither writes history nor bumps the version.
+- **Alternatives:** The framework's `saveIfCurrent` over a derived revision, which avoids a column but hides the version from the agent; row locks, which hold a connection while a person thinks.
+- **Consequences:** Every writer of a commitment must bump the version. The browser does not merge field by field; it offers the latest version and asks the person to apply the change again.
+- **Status:** Accepted
+
+## ADR-018: A later mention is evidence, confirmed by a person
+
+- **Context:** Pactlane's core promise is one commitment tracked across meetings. A wrong automatic match would corrupt that history, and keyword overlap cannot prove two statements mean the same thing.
+- **Decision:** A later mention is a `commitment_evidence` row on the existing commitment, marked with `linked_by` and `linked_at`. Only a person can create one: `link-commitment-evidence` is `uiOnly` and hidden from the agent. Suggestions are computed on read, with reasons and no score, and only dismissals are stored.
+- **Alternatives:** A separate timeline table, which would duplicate evidence and `changes`; automatic matching above a threshold, which fabricates certainty; vector search, which adds infrastructure without removing the need for a person; storing every suggestion, which adds state that goes stale.
+- **Consequences:** Trails are only as complete as people's review. Paraphrases with no shared word need a manual link. A meeting dated before a commitment's origin cannot be linked.
+- **Status:** Accepted
+
+## ADR-019: Commitment health is derived, not stored or inferred
+
+- **Context:** "Overdue" and "carried over" are claims people act on. A model or a repeated mention can make them sound true when the data does not support them.
+- **Decision:** Health is computed in code from persisted status, due date, flags and evidence, against a reference date. A date counts as confirmed only when no review flag questions it. A date an agent sets gets a `deadline` flag. Delays are never counted.
+- **Alternatives:** Storing health columns, which can drift; asking the model, which is not reproducible; counting repeated mentions as slippage, which fabricates history.
+- **Consequences:** No slippage score exists. A past due date under an open flag is not called overdue until a person settles it.
+- **Status:** Accepted

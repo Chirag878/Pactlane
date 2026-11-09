@@ -49,26 +49,40 @@ Deploying is optional for submission. Use the local app if hosting costs time. J
 
 ## Phase 2: Evidence Workspace 🟩
 
+**State: built locally and tested, including a browser run on a database copy. Not tested against a real model's output, and not deployed.**
+
 - **Goal:** people can see, trust and correct what was extracted.
 - **Features:**
-  - 🟩 Commitment list and `update-commitment`
+  - 🟩 Commitment list and `update-commitment`, with a version check against concurrent edits
   - 🟩 Source quote with its verification state
-  - 🟩 Review flag for uncertain items
-  - ⬜ Inline highlighting within the full transcript
+  - 🟩 Review flag for uncertain items, resolved flag by flag
+  - 🟩 Confirm, reject and restore, kept separate from evidence verification
+  - 🟩 Project participants: `add-person`, `list-people`, owner selection
+  - 🟩 Per-commitment change history
+  - 🟩 Inline highlighting within the full transcript, where server offsets still match
+  - ⬜ Editing or resolving decisions
   - ⬜ Bulk editing
+  - ⬜ Editing a participant, merging two, or inviting one
 - **Dependencies:** Phase 1.
 - **Deliverables:** an editable workspace.
 - **Definition of done:** an edit persists after reload, records a change, and is visible to the agent.
 - **Risks:** time spent on interface polish.
-- **Can be cut:** transcript highlighting; show the quote alone.
+- **Can be cut:** nothing remaining that Phase 3 needs.
 
 ## Phase 3: Commitment Trail 🟩
 
+**State: built locally and tested, including a browser run on a database copy. Candidate matching is deterministic. No real model has used these actions, and nothing is deployed.**
+
 - **Goal:** one commitment, tracked across meetings. This is the core differentiator.
 - **Features:**
-  - 🟩 Agent checks existing commitments and attaches new evidence
-  - 🟩 Trail view: meetings, evidence and changes in sequence
-  - 🟩 Carry-over detection derived from history
+  - 🟩 Project ledger of commitments across meetings, with filters
+  - 🟩 Deterministic candidate search with plain reasons
+  - 🟩 A person confirms or rules out each link; the agent cannot
+  - 🟩 Later evidence attached to the same commitment, verified against that meeting's transcript
+  - 🟩 Trail view: meetings, evidence, edits and review decisions in sequence, with source navigation
+  - 🟩 Health derived from saved data: overdue, revisited, needs review, meeting counts
+  - 🟩 Resolving a duplicate saved by a later analysis
+  - ⬜ Undoing a link or a dismissal
   - ⬜ Evidence kind column, such as delay or progress, an additive migration
   - ⬜ Slippage scoring
 - **Dependencies:** Phases 1 and 2.

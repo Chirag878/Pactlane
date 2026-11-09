@@ -1,6 +1,6 @@
 # Demo plan
 
-**None of this is functional yet.** This describes the demonstration the product should eventually support.
+**Partly functional.** Beats marked Works run in the local application with real actions and saved data. Analysis by a real model has not been run, so beat 1 needs a connected provider. Beats 5 to 7 are not built. Show only what works.
 
 Target: 2 to 3 minutes showing the real application, centered on one commitment across three meetings.
 
@@ -26,28 +26,28 @@ Expected: three commitments. Aarav's has an owner and a due date. Priya's has no
 > Priya: The API docs are done.
 > Meera: I'll book the room today.
 
-Expected: no duplicates. The presentation gets a new evidence item and a delay. API docs are completed. The room booking gets Meera as owner.
+Expected: no duplicates. Each statement is suggested as a mention of the existing commitment, and confirming it adds evidence. Completing the API docs and setting Meera as owner are separate edits a person makes. A request for more days is not recorded as a delay.
 
 **Meeting 3, Review**
 
 > Aarav: Sorry, the presentation is still incomplete.
 > Meera: Room is booked.
 
-Expected: the presentation has been unfinished across three meetings, and the agent notices.
+Expected: the presentation is linked to three meetings and still open. It is called overdue only if its due date was confirmed and has passed.
 
 ## Required product behavior
 
-| Beat | What the viewer sees |
-| --- | --- |
-| 1. Process | Paste the first transcript. The agent analyzes it. |
-| 2. Evidence | Commitments appear with their source quotes and a verified state. |
-| 3. Correct | The ownerless room-booking item is flagged. The user assigns it, and the change persists. |
-| 4. Continue | The second transcript updates existing commitments, with no duplicates, and shows unfinished work. |
-| 5. Detect | After the third, the agent identifies the repeated delay. |
-| 6. Propose | "The presentation commitment has remained unfinished across three meetings. Aarav previously requested an extension. Would you like to reassign part of the work or adjust the deadline?" |
-| 7. Decide | The user approves or corrects the proposal. |
-| 8. History | The Commitment Trail shows the sequence and who changed what. Undo reverses a change if built. |
-| 9. Result | A clear final state: one commitment, its full history and a decided next step. |
+| Beat | What the viewer sees | State |
+| --- | --- | --- |
+| 1. Process | Paste the first transcript. The agent analyzes it. | Needs a model; unverified |
+| 2. Evidence | Commitments appear with their source quotes and a verified state. | Works |
+| 3. Correct | The ownerless room-booking item is flagged. The user assigns it, and the change persists. | Works |
+| 4. Continue | Open the second meeting. Pactlane suggests the existing commitment, with its reasons. The user confirms the link, and no duplicate appears. | Works |
+| 5. Detect | After the third, the agent identifies the repeated delay. | Not built. The ledger shows revisited and overdue from saved data |
+| 6. Propose | "The presentation commitment has been linked to three meetings and is still open. Would you like to reassign part of the work or adjust the deadline?" | Not built |
+| 7. Decide | The user approves or corrects the proposal. | Not built. Manual correction works |
+| 8. History | The Commitment Trail shows the sequence and who changed what, and each quote opens its own transcript. | Works, without undo |
+| 9. Result | A clear final state: one commitment, its full history and a decided next step. | Works, up to the proposal |
 
 ## Judging alignment
 

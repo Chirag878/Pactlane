@@ -4,7 +4,7 @@
 
 Pactlane is an AI-native commitment manager for small teams. It turns meeting conversations into verifiable commitments, then follows each one across later meetings so nothing quietly slips.
 
-> **Status: Phase 0 foundation.** The application scaffold, database schema, agent rules and documentation exist and are validated locally. **The product features described below are not built yet.** See [Current completion status](#current-completion-status).
+> **Status: Phases 0 to 3 built locally.** A person can store meetings, save an analysis with server-verified evidence, correct and review commitments, and follow one commitment across meetings by confirming suggested links. **Agent proposals, undo and follow-ups are not built, and no real model has run extraction or matching.** See [Current completion status](#current-completion-status).
 
 | Read this | For |
 | --- | --- |
@@ -166,7 +166,7 @@ flowchart LR
 - **Storage.** Domain data lives in PostgreSQL, using PGlite locally and Supabase in production. The framework's own tables share the same database.
 - **Synchronization.** After each side-effecting tool call, the chat run invalidates affected action queries, so agent edits appear without custom sync code. Long-lived hosts use server-sent events; production serverless uses `/_agent-native/poll`.
 - **Source verification (planned).** The server loads the stored transcript and checks each proposed quote against it. Details are in [ARCHITECTURE.md](docs/ARCHITECTURE.md#source-verification).
-- **Authentication and authorization.** Better Auth owns sign-in. Actions receive the trusted identity as `ctx.userEmail` and `ctx.orgId`. Projects are registered as shareable resources, private by default and never link-public. Action-level enforcement arrives with the first actions in Phase 1.
+- **Authentication and authorization.** Better Auth owns sign-in. Actions receive the trusted identity as `ctx.userEmail` and `ctx.orgId`. Projects are registered as shareable resources, private by default and never link-public. Every project action checks access itself, and a missing project and a forbidden one give the same answer.
 
 ---
 
@@ -301,23 +301,25 @@ Workers Paid is effectively required: the free plan's 10 ms CPU limit cannot run
 
 ### Current completion status
 
-Evidence recorded 2026-11-08.
+Evidence recorded 2026-11-09.
 
 | Item | State |
 | --- | --- |
 | Chat template scaffold, dependencies, lockfile | **Validated** |
 | Documentation | **Implemented** |
-| Schema and migration | **Validated** on PGlite through the real framework plugin |
-| Invariant tests | **Validated**, 39 passing |
+| Schema and migrations v1 to v4 | **Validated** on PGlite, and v3 and v4 through the framework's migration runner on a copy of a database that already held v2 data |
+| Tests | **Validated**, 236 passing: schema, actions, access control, the real agent loop with a scripted model, health, matching and interface logic |
 | Typecheck, framework doctor | **Validated** |
-| Development server | **Validated** by HTTP response only, no browser walkthrough |
-| Node and Cloudflare builds, Wrangler dry run | **Validated**, not deployed |
-| Agent rules | **Implemented**, behavior untested because no model is configured |
-| Project access checks in actions | **Planned** for Phase 1 |
+| Node and Cloudflare builds | **Validated**, not deployed. Wrangler dry run last run in Phase 0 |
+| Project access checks in actions | **Implemented** and tested, including denial for other users and viewers |
+| Meeting storage, analysis saving, server evidence verification | **Implemented** and tested with controlled input |
+| Commitment editing, review, participants, history, meeting workspace | **Implemented**. Browser-tested on a database copy, with a second user denied |
+| Project ledger, candidate search, human-confirmed links, derived health, Commitment Trail | **Implemented**. Browser-tested across three meetings on a database copy. Matching is deterministic |
+| Agent rules | **Implemented**. A real model's behavior is untested because none is configured |
+| AI agent execution | **Blocked** on a provider credential. No real extraction has been run |
 | Supabase connection and migration | **Blocked** on a Supabase project |
 | Worker runtime behavior | **Blocked** on Cloudflare account and database |
-| AI agent execution | **Blocked** on a provider credential |
-| Meeting extraction, commitment workspace, Commitment Trail, proposals, undo | **Planned** |
+| Agent proposals, undo, follow-ups | **Planned** |
 
 ### Roadmap
 
@@ -333,10 +335,11 @@ See [docs/ROADMAP.md](docs/ROADMAP.md). Phases: 0 Foundation, 1 Meeting Intellig
 
 ### Risks and limitations
 
-- **The submission deadline is 2026-11-09, 11:59 PM PT, and the product is not built.** See the [roadmap's critical path](docs/ROADMAP.md#deadline-and-critical-path).
-- No AI behavior has been exercised yet.
+- **The submission deadline is 2026-11-09, 11:59 PM PT.** Agent proposals are not built. See the [roadmap's critical path](docs/ROADMAP.md#deadline-and-critical-path).
+- No real model has produced an analysis or used the ledger. Extraction quality, verbatim quoting and prompt-injection resistance are unverified.
+- Candidate matching compares words and names, so it can miss a paraphrase. A person can link by hand.
 - Worker runtime is unproven: only the build and dry run passed. See [DEPLOYMENT.md](docs/DEPLOYMENT.md#risk-analysis).
-- The journey extracts decisions, but no decisions table exists yet. Phase 1 adds it.
+- A meeting's first saved analysis cannot be replaced yet. Decisions can be read but not edited or resolved.
 
 ### Demo plan
 

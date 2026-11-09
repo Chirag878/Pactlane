@@ -86,6 +86,8 @@ erDiagram
 
 - **Decision** is a choice one meeting made, with its own `decision_evidence` quotes. Decisions are not tracked across meetings.
 - `commitments.stated_owner_name` and `stated_due_text` hold words verified in the transcript. `owner_id` is set only when the name matches exactly one existing `people` row. Analysis never creates a person.
+- `commitment_evidence.linked_by` and `linked_at` mark a quote a person confirmed as a later mention. `commitment_link_dismissals` records suggestions a person ruled out.
+- `commitments.version`, `review_state`, `reviewed_by`, `reviewed_at` and `review_flags` carry human control. See [Human control](#human-control).
 - `meetings.analysis_hash` is set once by `save-analysis`. An identical retry returns the saved result, and a different analysis for that meeting is refused.
 
 ## Database architecture
@@ -149,14 +151,21 @@ Implemented:
 | `list-meetings` | A project's meetings, without transcripts | Read | Viewer |
 | `get-meeting` | Meeting, transcript and extracted results | Read | Viewer |
 | `save-analysis` | Validate and persist the agent's extraction as one operation, verify evidence, flag uncertainty | Write | Editor |
+| `update-commitment` | One validated patch for description, owner, due date, priority, status, guarded by a version check | Write | Editor |
+| `review-commitment` | A person confirms, rejects or restores a commitment. Hidden from the agent and refused to agent callers | Write | Editor, signed-in person only |
+| `list-people` | A project's participants | Read | Viewer |
+| `add-person` | Add a participant, refusing a name or alias that already matches | Write | Editor |
+| `get-commitment-history` | A commitment's `changes`, newest first, as field-level before and after | Read | Viewer |
+| `get-commitment-ledger` | Every commitment in a project, with related meetings and derived health | Read | Viewer |
+| `get-commitment-trail` | One commitment's timeline across meetings | Read | Viewer |
+| `find-commitment-candidates` | Suggest which statements in a meeting may refer to earlier commitments | Read | Viewer |
+| `link-commitment-evidence` | A person confirms a later mention, attaching server-checked evidence | Write | Editor, signed-in app UI only |
+| `dismiss-commitment-link` | A person rules out a suggested link | Write | Editor, signed-in app UI only |
 
 Proposed:
 
 | Action | Responsibility | Reads or writes |
 | --- | --- | --- |
-| `list-commitments` | Filtered commitments, also used for matching before extraction | Read |
-| `update-commitment` | One validated patch for owner, date, description, priority, status | Write |
-| `get-ledger` | History for a commitment or project | Read |
 | `save-followup` | Create or edit a draft | Write |
 | `approve-followup` | Approve a draft, with `needsApproval` for agent callers | Write |
 | `undo-change` | Apply a controlled reversal of a recorded change | Write |
@@ -217,9 +226,86 @@ Rules:
 - An owner or deadline is kept only when a verified quote contains its words. An inferred owner is never assigned. A date worked out from relative words is saved and flagged.
 - Text is offset by JavaScript string index, so the transcript must stay unmodified.
 
+## Human control
+
+Implemented in migration v3 (`pactlane-human-control`) and `server/lib/commitment-changes.ts`.
+
+**Editing.** `update-commitment` takes a partial patch and the `expectedVersion` the caller last read. Every change to a commitment bumps `commitments.version`. The update runs as one compare-and-set statement together with its `changes` row in a transaction, so a stale editor gets `version_conflict` with the current commitment instead of overwriting newer work. A patch that changes nothing returns `changed: false`, writes no history and does not bump the version. A rejected commitment cannot be edited until restored.
+
+| Rule | Behavior |
+| --- | --- |
+| Owner | Must be a person of the same project, else `owner_not_in_project`. `null` unassigns. `stated_owner_name` and `stated_due_text` are never edited, so the transcript's words stay as history. |
+| Due date | A real calendar date or `null`. |
+| Status moves | `open`, `in_progress` and `blocked` move freely among themselves and to `completed` or `cancelled`. `completed` reopens only to `open` or `in_progress`, and only by a person. `cancelled` returns only to `open`. Anything else is `invalid_transition`. |
+| Evidence | Never read or written by these actions. |
+
+**Review.** Two separate questions are stored separately:
+
+| Question | Where | Who sets it |
+| --- | --- | --- |
+| Did the transcript contain the words? | `commitment_evidence.verification_status` | Server only, at `save-analysis` |
+| Did a person accept this commitment? | `commitments.review_state` (`proposed`, `confirmed`, `rejected`), with `reviewed_by` and `reviewed_at` | A signed-in person, through `review-commitment` |
+
+Confirming never changes evidence, so a `missing` quotation is still shown as not found after a person accepts the commitment.
+
+Why a commitment needs a person is stored as `review_flags`, a list of `{code, message}` with codes `evidence`, `owner`, `deadline`, `note` and `legacy`. `needs_review` is true while flags remain and the commitment is not rejected, and `review_reason` is their joined text for older readers. Rules:
+
+- Accepting a flag removes only the codes named. `confirm` with open flags and none named is refused, so nothing clears by default.
+- A commitment becomes `confirmed` only when no flags remain.
+- When a person sets an owner or a due date, the matching `owner` or `deadline` flag is settled and recorded. Setting a value to `null` leaves flags alone.
+- An agent's edit never settles a flag, and it moves a `confirmed` commitment back to `proposed`.
+- Rejecting keeps the row, its evidence and its history, and only changes `review_state`. Restoring returns it to `proposed` with its flags intact.
+- Rows saved before v3 got one `legacy` flag holding their old review text.
+
+Decisions are still read-only. They have review flags from `save-analysis` but no way to resolve them yet.
+
+**People.** Participants are `people` rows scoped to a project, with an optional email and no account. `add-person` refuses a display name or alias that matches an existing participant's name or alias, case-insensitively, and returns the matches so one can be selected. Similar but different names are kept apart, and nothing merges automatically.
+
+## Commitment Trail
+
+Implemented in migration v4 (`pactlane-commitment-trail`). There is no timeline table: a trail is read from `commitment_evidence` and `changes`.
+
+**Identity.** A commitment keeps one id across meetings. A later mention is one more evidence row on that id, so showing it in a new meeting never copies the commitment. The set of related meetings is the origin meeting plus any meeting with evidence.
+
+**Linking.** `link-commitment-evidence` takes a commitment, a later meeting of the same project, and a quotation.
+
+- `uiOnly` and `agentTool: false` together mean the server accepts it only from this app's signed-in UI. The framework checks the caller, the session cookie and a short-lived UI capability, so an agent, MCP client, CLI or raw HTTP call is refused even with valid credentials.
+- The quotation goes through the same `verifyQuote` as analysis and is stored whatever the result. `missing` or `ambiguous` evidence stays that way and adds an `evidence` review flag. A person can accept the flag, but that never verifies the quotation.
+- A partial unique index on the linked row makes retries and races idempotent. The evidence row and its `changes` row commit together.
+- Owner, due date and status are never touched. Those go through `update-commitment`.
+- The meeting must be in the same project, not the origin meeting, and not dated before the origin meeting. A rejected commitment cannot be linked.
+
+**Finding candidates.** `find-commitment-candidates` is deterministic and read-only (`server/lib/commitment-matching.ts`). It splits a transcript into statements, each an exact slice, and compares each against earlier commitments of the project.
+
+| Signal | Use |
+| --- | --- |
+| Distinctive words shared with the description | Required. Filler, generic verbs, dates and the owner's name do not count |
+| The owner's name or alias appears in the statement | Lowers how many shared words are required |
+| Wording such as "still" or "not delivered" | Adds a reason only. Never enough alone |
+| The origin meeting's title appears | Adds a reason only |
+
+Results carry plain reasons and no score. Every commitment that could match is listed, so a person chooses. A statement that repeats in a transcript gets no offsets, so linking it is saved as `ambiguous`. This misses paraphrases that share no distinctive word, so a person can also link by hand from the meeting page.
+
+**Duplicates.** `save-analysis` is unchanged and never matches across meetings. If analysis of a later meeting saved a commitment from a statement that matches an earlier one, the candidate says so. Confirming links the evidence to the earlier commitment and rejects the new one as a duplicate, in one transaction, keeping its row, evidence and history.
+
+**Health.** `server/lib/commitment-health.ts` derives everything from saved rows, with no model and nothing stored.
+
+| Signal | Rule |
+| --- | --- |
+| Overdue | Status is open, in progress or blocked, not rejected, the due date is before the reference date, and no `deadline` or `legacy` flag questions it. A date from relative words stays unconfirmed until a person settles it, and a date an agent sets is flagged |
+| Revisited | Verified evidence from two or more distinct meetings |
+| Meeting count | Distinct meetings, so several quotes from one meeting count once |
+| Needs review | The commitment's open flags |
+
+`facts` are sentences built from these values, for the UI and the agent to repeat. Nothing counts delays or claims work was unfinished on a past date. A due-date change shows only as an entry in the audit trail.
+
+**Timeline.** Events are the origin, one mention per later meeting, edits, review decisions and dismissals. The origin comes first. The rest sort by when they happened (a transcript event by its meeting date, a change by its timestamp), then by kind and id, so order is stable. Each event says what it is: transcript evidence, a human-confirmed link, a manual change, an agent change or a review decision.
+
 ## Audit history
 
 `changes` is the product-facing history behind Commitment Trail. It is separate from the framework's automatic action audit, which is operational. Each record stores the entity, operation, actor type, actor id and before and after state.
+
+For commitments, an update's `before_state` and `after_state` hold only the fields that changed. `get-commitment-history` turns them into a field list with owner names resolved, newest first, up to 100 entries. Edits, reviews and the original `save-analysis` record all appear. There is no undo yet.
 
 Actor identity comes from the trusted action context: `ctx.userEmail` for the person, and `ctx.caller` to tell an agent tool call from the UI. It is never read from action input.
 
@@ -248,7 +334,7 @@ stateDiagram-v2
   end note
 ```
 
-The status values and the `completed_at` rule are implemented. The transition rules are planned for Phase 1.
+The status values, the `completed_at` rule and the transition rules are implemented, in `update-commitment`. See [Human control](#human-control) for the exact moves.
 
 Delay and carry-over are derived from evidence and `changes`, not stored as a status, so a slipped commitment keeps its true state.
 

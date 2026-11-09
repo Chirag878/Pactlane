@@ -4,7 +4,7 @@
 
 Pactlane is an AI-native commitment manager for small teams. It turns meeting conversations into verifiable commitments, then follows each one across later meetings so nothing quietly slips.
 
-> **Status: Phases 0 to 3 built locally.** A person can store meetings, save an analysis with server-verified evidence, correct and review commitments, and follow one commitment across meetings by confirming suggested links. **Agent proposals, undo and follow-ups are not built, and no real model has run extraction or matching.** See [Current completion status](#current-completion-status).
+> **Status: Phases 0 to 3 and the Phase 5 summary-first meeting checkpoint are built locally.** A person can store meetings, save structured meeting intelligence with server-verified evidence, correct and review commitments, and follow one commitment across meetings by confirming suggested links. **Calendar creation, agent proposals, undo and follow-up delivery are not built, and real-model extraction still requires independent verification.** See [Current completion status](#current-completion-status).
 
 | Read this | For |
 | --- | --- |
@@ -207,7 +207,7 @@ Pactlane is a modular monolith. These are logical boundaries, not packages or se
 
 ### Database overview
 
-Eight tables: `projects`, `project_shares`, `people`, `meetings`, `commitments`, `commitment_evidence`, `changes` and `followups`. Full design and the invariant table are in [ARCHITECTURE.md](docs/ARCHITECTURE.md#database-architecture).
+The domain tables cover projects and sharing, people, meetings, commitments, decisions, open questions and blockers, next-meeting suggestions, transcript evidence, link dismissals, change history and follow-up drafts. Full design and the invariant table are in [ARCHITECTURE.md](docs/ARCHITECTURE.md#database-architecture).
 
 ### Shared action design
 
@@ -307,12 +307,12 @@ Evidence recorded 2026-11-09.
 | --- | --- |
 | Chat template scaffold, dependencies, lockfile | **Validated** |
 | Documentation | **Implemented** |
-| Schema and migrations v1 to v4 | **Validated** on PGlite, and v3 and v4 through the framework's migration runner on a copy of a database that already held v2 data |
-| Tests | **Validated**, 244 passing: schema, actions, access control, the real agent loop with a scripted model, health, matching and interface logic |
+| Schema and migrations v1 to v5 | **Validated** on PGlite; v5 is additive and older analyzed meetings remain readable |
+| Tests | **Validated**, 257 passing: schema, actions, access control, hash compatibility for older analyses, the real agent loop with a scripted model, health, matching and interface logic |
 | Typecheck, framework doctor | **Validated** |
 | Node and Cloudflare builds | **Validated**, not deployed. Wrangler dry run last run in Phase 0 |
 | Project access checks in actions | **Implemented** and tested, including denial for other users and viewers |
-| Meeting storage, analysis saving, server evidence verification | **Implemented** and tested with controlled input |
+| Meeting storage, summary-first analysis, server evidence verification | **Implemented** and tested with controlled input, including questions, blockers and reviewable next-meeting suggestions |
 | Commitment editing, review, participants, history, meeting workspace | **Implemented**. Browser-tested on a database copy, with a second user denied |
 | Project ledger, candidate search, human-confirmed links, derived health, Commitment Trail | **Implemented**. Browser-tested across three meetings on a database copy. Matching is deterministic |
 | Agent rules | **Implemented**. A real model's behavior is untested because none is configured |

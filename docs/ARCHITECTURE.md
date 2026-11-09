@@ -1,6 +1,6 @@
 # Architecture
 
-Status as of 2026-11-08, Phase 1. **Implemented** means the code exists now. Everything else is a design for later phases. In diagrams, dashed boxes have not been built.
+Status as of 2026-11-09, Phase 5 Checkpoint 1. **Implemented** means the code exists now. Everything else is a design for later phases. In diagrams, dashed boxes have not been built.
 
 Framework details were checked against Agent-Native 0.226.0: its documentation, the generated template and the installed package source.
 
@@ -12,10 +12,10 @@ One deployable application, organized by domain. There are no separate services,
 | --- | --- | --- |
 | projects | `projects`, `project_shares` | Tables implemented |
 | people | `people` | Table implemented |
-| meetings | `meetings` | Table implemented |
+| meetings | `meetings`, `meeting_findings`, `next_meeting_suggestions` | Tables implemented |
 | commitments | `commitments` | Table implemented |
 | decisions | `decisions` | Table implemented |
-| evidence | `commitment_evidence`, `decision_evidence` | Tables implemented |
+| evidence | `commitment_evidence`, `decision_evidence`, `meeting_finding_evidence`, `next_meeting_evidence` | Tables implemented |
 | ledger | `changes` | Table implemented |
 | followups | `followups` | Table implemented |
 
@@ -72,6 +72,8 @@ erDiagram
   projects ||--o{ changes : records
   projects ||--o{ project_shares : grants
   meetings ||--o{ commitment_evidence : supports
+  meetings ||--o{ meeting_findings : identifies
+  meetings ||--o| next_meeting_suggestions : suggests
   commitments ||--o{ commitment_evidence : "backed by"
   meetings |o--o{ commitments : originates
   people |o--o{ commitments : owns
@@ -85,6 +87,8 @@ erDiagram
 - **Change** is one recorded modification with before and after state.
 
 - **Decision** is a choice one meeting made, with its own `decision_evidence` quotes. Decisions are not tracked across meetings.
+- **Meeting finding** is an open question or blocker from one meeting, with its own exact evidence quotes. Findings are not commitments or decisions.
+- **Next meeting suggestion** is at most one reviewable date, time, participant and purpose proposal per meeting. Explicit dates and times must match their verified quotation; unsupported or relative values are left unresolved with a review reason. No calendar event is created.
 - `commitments.stated_owner_name` and `stated_due_text` hold words verified in the transcript. `owner_id` is set only when the name matches exactly one existing `people` row. Analysis never creates a person.
 - `commitment_evidence.linked_by` and `linked_at` mark a quote a person confirmed as a later mention. `commitment_link_dismissals` records suggestions a person ruled out.
 - `commitments.version`, `review_state`, `reviewed_by`, `reviewed_at` and `review_flags` carry human control. See [Human control](#human-control).
@@ -150,7 +154,7 @@ Implemented:
 | `create-meeting` | Store a meeting and its original transcript | Write | Editor |
 | `list-meetings` | A project's meetings, without transcripts | Read | Viewer |
 | `get-meeting` | Meeting, transcript and extracted results | Read | Viewer |
-| `save-analysis` | Validate and persist the agent's extraction as one operation, verify evidence, flag uncertainty | Write | Editor |
+| `save-analysis` | Validate and persist summary, action items, decisions, questions, blockers and an optional next-meeting suggestion as one operation; verify evidence and flag uncertainty | Write | Editor |
 | `update-commitment` | One validated patch for description, owner, due date, priority, status, guarded by a version check | Write | Editor |
 | `review-commitment` | A person confirms, rejects or restores a commitment. Hidden from the agent and refused to every non-UI caller | Write | Editor, signed-in app UI only |
 | `list-people` | A project's participants | Read | Viewer |

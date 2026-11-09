@@ -2,6 +2,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../db/index.js";
+import { viewerVisibleChange } from "./analysis-publication.js";
 
 const fieldValue = z.union([
   z.string(),
@@ -72,8 +73,10 @@ export async function loadCommitmentChanges(
   projectId: string,
   commitmentId: string,
   limit: number,
+  includeDraft = true,
+  db: ReturnType<typeof getDb> = getDb(),
 ) {
-  return getDb()
+  return db
     .select()
     .from(schema.changes)
     .where(
@@ -81,6 +84,7 @@ export async function loadCommitmentChanges(
         eq(schema.changes.projectId, projectId),
         eq(schema.changes.entityType, "commitment"),
         eq(schema.changes.entityId, commitmentId),
+        includeDraft ? undefined : viewerVisibleChange(),
       ),
     )
     .orderBy(asc(schema.changes.createdAt), asc(schema.changes.id))
@@ -91,6 +95,7 @@ export async function loadCommitmentChanges(
 export async function describeChanges(
   projectId: string,
   rows: ChangeRow[],
+  db: ReturnType<typeof getDb> = getDb(),
 ): Promise<HistoryEntry[]> {
   // Records saved with the analysis carry only an owner id: resolve names here.
   const ownerIds = [
@@ -103,7 +108,7 @@ export async function describeChanges(
     ),
   ];
   const people = ownerIds.length
-    ? await getDb()
+    ? await db
         .select({ id: schema.people.id, name: schema.people.displayName })
         .from(schema.people)
         .where(

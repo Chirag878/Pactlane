@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { ReviewFlag, ReviewState } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
 import type { Actor } from "./action-context.js";
+import { invalidateAnalysisPublication } from "./analysis-publication.js";
 import { summarizeFlags } from "./analysis-review.js";
 import { loadCommitmentResult } from "./meeting-results.js";
 
@@ -90,6 +91,29 @@ export async function saveCommitmentChange(options: {
       beforeState: before,
       afterState: after,
     });
+    const invalidated = await invalidateAnalysisPublication(
+      tx,
+      current.projectId,
+      current.originMeetingId,
+    );
+    if (invalidated) {
+      await tx.insert(schema.changes).values({
+        projectId: current.projectId,
+        entityType: "meeting",
+        entityId: current.originMeetingId!,
+        actorType: actor.actorType,
+        actorId: actor.email,
+        operation: "update",
+        beforeState: {
+          analysisPublicationState: invalidated.previousState,
+          analysisContentRevision: invalidated.previousRevision,
+        },
+        afterState: {
+          analysisPublicationState: "draft",
+          analysisContentRevision: invalidated.contentRevision,
+        },
+      });
+    }
     return row;
   });
 

@@ -23,6 +23,7 @@ import {
   FOLLOWUP_STATUSES,
   MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
+  ANALYSIS_PUBLICATION_STATES,
   REVIEW_STATES,
   type ReviewFlag,
 } from "../../shared/domain.js";
@@ -86,6 +87,23 @@ export const meetings = pgTable("meetings", {
     .default("pending"),
   /** Set once by save-analysis, so a retried save cannot create duplicates. */
   analysisHash: text("analysis_hash"),
+  /** New AI results are private drafts until an editor publishes them. */
+  analysisPublicationState: text("analysis_publication_state", {
+    enum: ANALYSIS_PUBLICATION_STATES,
+  })
+    .notNull()
+    .default("draft"),
+  /** Bumped whenever reviewable analysis content changes. */
+  analysisContentRevision: integer("analysis_content_revision")
+    .notNull()
+    .default(0),
+  /** Attribution exists for publications made after publication tracking began. */
+  analysisPublishedBy: text("analysis_published_by"),
+  analysisPublishedAt: timestamp("analysis_published_at", {
+    withTimezone: true,
+  }),
+  /** The exact content revision approved by the attributed reviewer. */
+  analysisPublishedRevision: integer("analysis_published_revision"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

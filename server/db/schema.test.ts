@@ -6,6 +6,7 @@ import {
   CHANGE_ACTOR_TYPES,
   CHANGE_ENTITY_TYPES,
   CHANGE_OPERATIONS,
+  ANALYSIS_PUBLICATION_STATES,
   COMMITMENT_PRIORITIES,
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
@@ -127,6 +128,7 @@ describe("foundation migration", () => {
   it.each([
     ["projects_visibility_check", PROJECT_VISIBILITIES],
     ["meetings_processing_status_check", MEETING_PROCESSING_STATUSES],
+    ["meetings_analysis_publication_state_check", ANALYSIS_PUBLICATION_STATES],
     ["commitments_status_check", COMMITMENT_STATUSES],
     ["commitments_priority_check", COMMITMENT_PRIORITIES],
     ["commitments_review_state_check", REVIEW_STATES],
@@ -161,6 +163,99 @@ describe("foundation migration", () => {
     );
     expect(allowed.sort()).toEqual([...values].sort());
   });
+});
+
+describe("publication migration", () => {
+  it("backfills v5 analysis as legacy published while new and old-writer analysis stays draft", async () => {
+    const legacyDb = new PGlite();
+    try {
+      await legacyDb.exec(
+        migrations
+          .slice(0, 5)
+          .map((migration) => migration.sql as string)
+          .join("\n"),
+      );
+      await legacyDb.exec(`
+        INSERT INTO projects (id, name) VALUES ('legacy-project', 'Legacy');
+        INSERT INTO meetings (
+          id, project_id, title, meeting_date, transcript,
+          processing_status, analysis_hash
+        ) VALUES (
+          'legacy-analyzed', 'legacy-project', 'Analyzed', '2026-11-01',
+          'Transcript', 'processed', 'legacy-hash'
+        );
+        INSERT INTO meetings (id, project_id, title, meeting_date)
+        VALUES ('legacy-pending', 'legacy-project', 'Pending', '2026-11-02');
+      `);
+
+      await legacyDb.exec(migrations[5]!.sql as string);
+      await legacyDb.exec(migrations[6]!.sql as string);
+      const { rows: migrated } = await legacyDb.query<{
+        id: string;
+        state: string;
+        content_revision: number;
+        published_by: string | null;
+        published_at: string | null;
+        published_revision: number | null;
+      }>(`
+        SELECT id,
+          analysis_publication_state AS state,
+          analysis_content_revision AS content_revision,
+          analysis_published_by AS published_by,
+          analysis_published_at AS published_at,
+          analysis_published_revision AS published_revision
+        FROM meetings
+        ORDER BY id
+      `);
+      expect(migrated).toEqual([
+        {
+          id: "legacy-analyzed",
+          state: "published",
+          content_revision: 1,
+          published_by: null,
+          published_at: null,
+          published_revision: null,
+        },
+        {
+          id: "legacy-pending",
+          state: "draft",
+          content_revision: 0,
+          published_by: null,
+          published_at: null,
+          published_revision: null,
+        },
+      ]);
+
+      await legacyDb.exec(`
+        INSERT INTO meetings (id, project_id, title, meeting_date)
+        VALUES ('old-writer', 'legacy-project', 'Mixed rollout', '2026-11-03');
+        UPDATE meetings
+        SET transcript = 'Saved by old code', processing_status = 'processed',
+            analysis_hash = 'old-writer-hash'
+        WHERE id = 'old-writer';
+      `);
+      const { rows: mixed } = await legacyDb.query<{
+        state: string;
+        revision: number;
+      }>(`
+        SELECT analysis_publication_state AS state,
+               analysis_content_revision AS revision
+        FROM meetings WHERE id = 'old-writer'
+      `);
+      expect(mixed[0]).toEqual({ state: "draft", revision: 0 });
+
+      // Re-applying a partially completed migration must not classify the
+      // old-writer row as a legacy publication.
+      await legacyDb.exec(migrations[6]!.sql as string);
+      const { rows: reapplied } = await legacyDb.query<{ state: string }>(`
+        SELECT analysis_publication_state AS state
+        FROM meetings WHERE id = 'old-writer'
+      `);
+      expect(reapplied[0]!.state).toBe("draft");
+    } finally {
+      await legacyDb.close();
+    }
+  }, 60_000);
 });
 
 describe("commitment invariants", () => {

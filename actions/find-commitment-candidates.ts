@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeMeeting,
+  authorizeProject,
   requireActor,
 } from "../server/lib/action-context.js";
 import {
@@ -65,132 +66,179 @@ export default defineAction({
     requireActor(ctx);
     const meeting = await authorizeMeeting(meetingId, "viewer");
     const { projectId } = meeting;
-    if (!meeting.transcript) return { meetingId, statements: [] };
-
-    const db = getDb();
-    const [commitments, evidence, dismissals, meetings, people] =
-      await Promise.all([
-        db
+    const access = await authorizeProject(projectId, "viewer");
+    const includeDraft = access.role !== "viewer";
+    return getDb().transaction(
+      async (db) => {
+        const [snapshotMeeting] = await db
           .select()
-          .from(schema.commitments)
-          .where(eq(schema.commitments.projectId, projectId)),
-        db
-          .select()
-          .from(schema.commitmentEvidence)
-          .where(eq(schema.commitmentEvidence.projectId, projectId)),
-        db
-          .select()
-          .from(schema.commitmentLinkDismissals)
+          .from(schema.meetings)
           .where(
             and(
-              eq(schema.commitmentLinkDismissals.projectId, projectId),
-              eq(schema.commitmentLinkDismissals.meetingId, meetingId),
+              eq(schema.meetings.id, meeting.id),
+              eq(schema.meetings.projectId, projectId),
             ),
-          ),
-        db
-          .select({
-            id: schema.meetings.id,
-            title: schema.meetings.title,
-            date: schema.meetings.meetingDate,
-          })
-          .from(schema.meetings)
-          .where(eq(schema.meetings.projectId, projectId)),
-        db
-          .select()
-          .from(schema.people)
-          .where(eq(schema.people.projectId, projectId)),
-      ]);
+          )
+          .limit(1);
+        if (
+          !snapshotMeeting ||
+          (!includeDraft &&
+            snapshotMeeting.analysisPublicationState === "draft")
+        ) {
+          return { meetingId, statements: [] };
+        }
+        if (!snapshotMeeting.transcript) return { meetingId, statements: [] };
 
-    const meetingById = new Map(meetings.map((m) => [m.id, m]));
-    const personById = new Map(people.map((p) => [p.id, p]));
-    const live = commitments.filter((c) => c.reviewState !== "rejected");
+        const [commitments, evidence, dismissals, meetings, people] =
+          await Promise.all([
+            db
+              .select()
+              .from(schema.commitments)
+              .where(eq(schema.commitments.projectId, projectId)),
+            db
+              .select()
+              .from(schema.commitmentEvidence)
+              .where(eq(schema.commitmentEvidence.projectId, projectId)),
+            db
+              .select()
+              .from(schema.commitmentLinkDismissals)
+              .where(
+                and(
+                  eq(schema.commitmentLinkDismissals.projectId, projectId),
+                  eq(schema.commitmentLinkDismissals.meetingId, meetingId),
+                ),
+              ),
+            db
+              .select({
+                id: schema.meetings.id,
+                title: schema.meetings.title,
+                date: schema.meetings.meetingDate,
+                analysisPublicationState:
+                  schema.meetings.analysisPublicationState,
+              })
+              .from(schema.meetings)
+              .where(eq(schema.meetings.projectId, projectId)),
+            db
+              .select()
+              .from(schema.people)
+              .where(eq(schema.people.projectId, projectId)),
+          ]);
 
-    // Only commitments that already existed by this meeting can be mentioned in it.
-    const earlier = live.filter((c) => {
-      if (c.originMeetingId === meetingId) return false;
-      const origin = c.originMeetingId
-        ? meetingById.get(c.originMeetingId)
-        : undefined;
-      return !origin || origin.date <= meeting.meetingDate;
-    });
-    const known: KnownCommitment[] = earlier.map((c) => {
-      const origin = c.originMeetingId
-        ? meetingById.get(c.originMeetingId)
-        : undefined;
-      const person = c.ownerId ? personById.get(c.ownerId) : undefined;
-      return {
-        id: c.id,
-        description: c.description,
-        originMeetingId: c.originMeetingId,
-        originMeetingTitle: origin?.title ?? null,
-        originMeetingDate: origin?.date ?? null,
-        ownerNames: [
-          ...new Set(
-            [
-              person?.displayName,
-              ...(person?.aliases ?? []),
-              c.statedOwnerName,
-            ].filter((name): name is string => Boolean(name)),
-          ),
-        ],
-      };
-    });
-    const analysed: AnalysedCommitment[] = live
-      .filter((c) => c.originMeetingId === meetingId)
-      .map((c) => ({
-        id: c.id,
-        description: c.description,
-        ranges: evidence.flatMap((e) =>
-          e.commitmentId === c.id &&
-          e.meetingId === meetingId &&
-          e.sourceStart !== null &&
-          e.sourceEnd !== null
-            ? [{ start: e.sourceStart, end: e.sourceEnd }]
-            : [],
-        ),
-      }));
+        const visibleMeetingIds = new Set(
+          includeDraft
+            ? meetings.map((candidate) => candidate.id)
+            : meetings
+                .filter(
+                  (candidate) => candidate.analysisPublicationState !== "draft",
+                )
+                .map((candidate) => candidate.id),
+        );
+        const meetingById = new Map(
+          meetings
+            .filter((candidate) => visibleMeetingIds.has(candidate.id))
+            .map((m) => [m.id, m]),
+        );
+        const visibleEvidence = evidence.filter((row) =>
+          visibleMeetingIds.has(row.meetingId),
+        );
+        const personById = new Map(people.map((p) => [p.id, p]));
+        const live = commitments.filter(
+          (c) =>
+            c.reviewState !== "rejected" &&
+            (!c.originMeetingId || visibleMeetingIds.has(c.originMeetingId)),
+        );
 
-    const settled = new Set([
-      ...evidence
-        .filter((e) => e.meetingId === meetingId)
-        .map((e) => settledKey(e.commitmentId, e.sourceQuote)),
-      ...dismissals.map((d) => settledKey(d.commitmentId, d.sourceQuote)),
-    ]);
+        // Only commitments that already existed by this meeting can be mentioned in it.
+        const earlier = live.filter((c) => {
+          if (c.originMeetingId === meetingId) return false;
+          const origin = c.originMeetingId
+            ? meetingById.get(c.originMeetingId)
+            : undefined;
+          return !origin || origin.date <= snapshotMeeting.meetingDate;
+        });
+        const known: KnownCommitment[] = earlier.map((c) => {
+          const origin = c.originMeetingId
+            ? meetingById.get(c.originMeetingId)
+            : undefined;
+          const person = c.ownerId ? personById.get(c.ownerId) : undefined;
+          return {
+            id: c.id,
+            description: c.description,
+            originMeetingId: c.originMeetingId,
+            originMeetingTitle: origin?.title ?? null,
+            originMeetingDate: origin?.date ?? null,
+            ownerNames: [
+              ...new Set(
+                [
+                  person?.displayName,
+                  ...(person?.aliases ?? []),
+                  c.statedOwnerName,
+                ].filter((name): name is string => Boolean(name)),
+              ),
+            ],
+          };
+        });
+        const analysed: AnalysedCommitment[] = live
+          .filter((c) => c.originMeetingId === meetingId)
+          .map((c) => ({
+            id: c.id,
+            description: c.description,
+            ranges: visibleEvidence.flatMap((e) =>
+              e.commitmentId === c.id &&
+              e.meetingId === meetingId &&
+              e.sourceStart !== null &&
+              e.sourceEnd !== null
+                ? [{ start: e.sourceStart, end: e.sourceEnd }]
+                : [],
+            ),
+          }));
 
-    const commitmentById = new Map(commitments.map((c) => [c.id, c]));
-    const statements = findCandidates(
-      meeting.transcript,
-      known,
-      analysed,
-      (commitmentId, quote) => settled.has(settledKey(commitmentId, quote)),
-    ).map((statement) => ({
-      ...statement,
-      candidates: statement.candidates.map(({ commitmentId, reasons }) => {
-        const c = commitmentById.get(commitmentId)!;
-        const owner = c.ownerId ? personById.get(c.ownerId) : undefined;
-        return {
-          commitmentId,
-          description: c.description,
-          ownerName: owner?.displayName ?? c.statedOwnerName,
-          status: c.status,
-          dueDate: c.dueDate,
-          originMeeting:
-            (c.originMeetingId && meetingById.get(c.originMeetingId)) || null,
-          originalQuotes: evidence
-            .filter(
-              (e) =>
-                e.commitmentId === c.id && e.meetingId === c.originMeetingId,
-            )
-            .slice(0, 3)
-            .map((e) => ({
-              quote: e.sourceQuote,
-              verificationStatus: e.verificationStatus,
-            })),
-          reasons,
-        };
-      }),
-    }));
+        const settled = new Set([
+          ...visibleEvidence
+            .filter((e) => e.meetingId === meetingId)
+            .map((e) => settledKey(e.commitmentId, e.sourceQuote)),
+          ...dismissals.map((d) => settledKey(d.commitmentId, d.sourceQuote)),
+        ]);
 
-    return { meetingId, statements };
+        const commitmentById = new Map(commitments.map((c) => [c.id, c]));
+        const statements = findCandidates(
+          snapshotMeeting.transcript,
+          known,
+          analysed,
+          (commitmentId, quote) => settled.has(settledKey(commitmentId, quote)),
+        ).map((statement) => ({
+          ...statement,
+          candidates: statement.candidates.map(({ commitmentId, reasons }) => {
+            const c = commitmentById.get(commitmentId)!;
+            const owner = c.ownerId ? personById.get(c.ownerId) : undefined;
+            return {
+              commitmentId,
+              description: c.description,
+              ownerName: owner?.displayName ?? c.statedOwnerName,
+              status: c.status,
+              dueDate: c.dueDate,
+              originMeeting:
+                (c.originMeetingId && meetingById.get(c.originMeetingId)) ||
+                null,
+              originalQuotes: visibleEvidence
+                .filter(
+                  (e) =>
+                    e.commitmentId === c.id &&
+                    e.meetingId === c.originMeetingId,
+                )
+                .slice(0, 3)
+                .map((e) => ({
+                  quote: e.sourceQuote,
+                  verificationStatus: e.verificationStatus,
+                })),
+              reasons,
+            };
+          }),
+        }));
+
+        return { meetingId, statements };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   },
 });

@@ -14,6 +14,11 @@ export const MEETING_PROCESSING_STATUSES = [
   "failed",
 ] as const;
 
+/** Visibility of an AI analysis, separate from evidence verification and item review. */
+export const ANALYSIS_PUBLICATION_STATES = ["draft", "published"] as const;
+export type AnalysisPublicationState =
+  (typeof ANALYSIS_PUBLICATION_STATES)[number];
+
 export const MEETING_FINDING_KINDS = ["open_question", "blocker"] as const;
 export type MeetingFindingKind = (typeof MEETING_FINDING_KINDS)[number];
 

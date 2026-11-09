@@ -249,7 +249,10 @@ export default defineAction({
 
     const replay = async (current: typeof meeting) => {
       if (current.analysisHash !== hash) alreadySaved();
-      const result = await loadMeetingResult(current);
+      const result = await loadMeetingResult(current, {
+        includeDraft: true,
+        canPublish: true,
+      });
       const _receipt: WriteReceipt = {
         changed: false,
         verified: true,
@@ -380,6 +383,11 @@ export default defineAction({
           summary: analysis.summary.trim(),
           processingStatus: "processed",
           analysisHash: hash,
+          analysisPublicationState: "draft",
+          analysisContentRevision: 1,
+          analysisPublishedBy: null,
+          analysisPublishedAt: null,
+          analysisPublishedRevision: null,
         })
         .where(
           and(
@@ -451,6 +459,8 @@ export default defineAction({
           afterState: {
             summary: analysis.summary.trim(),
             processingStatus: "processed",
+            analysisPublicationState: "draft",
+            analysisContentRevision: 1,
           },
         },
         ...decisions.map((d) =>
@@ -527,7 +537,8 @@ export default defineAction({
     }
 
     const result = await loadMeetingResult(
-      await authorizeMeeting(meetingId, "viewer"),
+      await authorizeMeeting(meetingId, "editor"),
+      { includeDraft: true, canPublish: true },
     );
     const persisted =
       result.analysisSaved &&

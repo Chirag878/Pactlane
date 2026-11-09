@@ -35,17 +35,28 @@ export default defineAction({
   }),
   run: async ({ projectId, asOf }, ctx) => {
     requireActor(ctx);
-    await authorizeProject(projectId, "viewer");
-    const [project] = await getDb()
-      .select({ id: schema.projects.id, name: schema.projects.name })
-      .from(schema.projects)
-      .where(eq(schema.projects.id, projectId))
-      .limit(1);
+    const access = await authorizeProject(projectId, "viewer");
     const date = asOf ?? utcToday();
-    return {
-      project: project!,
-      asOf: date,
-      ...(await loadLedgerEntries(projectId, date)),
-    };
+    return getDb().transaction(
+      async (tx) => {
+        const [project] = await tx
+          .select({ id: schema.projects.id, name: schema.projects.name })
+          .from(schema.projects)
+          .where(eq(schema.projects.id, projectId))
+          .limit(1);
+        return {
+          project: project!,
+          asOf: date,
+          ...(await loadLedgerEntries(
+            projectId,
+            date,
+            undefined,
+            access.role !== "viewer",
+            tx,
+          )),
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   },
 });

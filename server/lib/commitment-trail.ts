@@ -108,11 +108,12 @@ export function sortTrailEvents(events: TrailEvent[]) {
 export async function loadCommitmentTrail(
   commitment: Commitment,
   asOf: string,
+  includeDraft = false,
+  db: ReturnType<typeof getDb> = getDb(),
 ): Promise<CommitmentTrail> {
   const { projectId, id, originMeetingId } = commitment;
-  const db = getDb();
   const [{ entries }, evidence, meetings, changes] = await Promise.all([
-    loadLedgerEntries(projectId, asOf, id),
+    loadLedgerEntries(projectId, asOf, id, includeDraft, db),
     db
       .select()
       .from(schema.commitmentEvidence)
@@ -131,20 +132,65 @@ export async function loadCommitmentTrail(
         id: schema.meetings.id,
         title: schema.meetings.title,
         date: schema.meetings.meetingDate,
+        analysisPublicationState: schema.meetings.analysisPublicationState,
       })
       .from(schema.meetings)
       .where(eq(schema.meetings.projectId, projectId)),
-    loadCommitmentChanges(projectId, id, CHANGE_LIMIT).then((rows) =>
-      describeChanges(projectId, rows).then((described) => ({
-        rows,
-        described,
-      })),
+    loadCommitmentChanges(projectId, id, CHANGE_LIMIT, includeDraft, db).then(
+      (rows) =>
+        describeChanges(projectId, rows, db).then((described) => ({
+          rows,
+          described,
+        })),
     ),
   ]);
 
-  const meetingById = new Map(meetings.map((m) => [m.id, m]));
+  const visibleMeetingIds = new Set(
+    includeDraft
+      ? meetings.map((meeting) => meeting.id)
+      : meetings
+          .filter((meeting) => meeting.analysisPublicationState !== "draft")
+          .map((meeting) => meeting.id),
+  );
+  const meetingById = new Map(
+    meetings
+      .filter((meeting) => visibleMeetingIds.has(meeting.id))
+      .map((m) => [m.id, m]),
+  );
+  const draftMeetingIds = new Set(
+    meetings
+      .filter((meeting) => meeting.analysisPublicationState === "draft")
+      .map((meeting) => meeting.id),
+  );
+  const mentionsDraftMeeting = (state: Record<string, unknown> | null) => {
+    const link = state?.evidenceLink ?? state?.dismissedLink;
+    return (
+      link !== null &&
+      typeof link === "object" &&
+      "meetingId" in link &&
+      typeof link.meetingId === "string" &&
+      draftMeetingIds.has(link.meetingId)
+    );
+  };
+  const visibleChangeIds = new Set(
+    changes.rows
+      .filter(
+        (row) =>
+          includeDraft ||
+          (!mentionsDraftMeeting(row.beforeState) &&
+            !mentionsDraftMeeting(row.afterState)),
+      )
+      .map((row) => row.id),
+  );
+  const visibleChanges = {
+    rows: changes.rows.filter((row) => visibleChangeIds.has(row.id)),
+    described: changes.described.filter((entry) =>
+      visibleChangeIds.has(entry.id),
+    ),
+  };
   const byMeeting = new Map<string, typeof evidence>();
   for (const row of evidence) {
+    if (!visibleMeetingIds.has(row.meetingId)) continue;
     const list = byMeeting.get(row.meetingId) ?? [];
     list.push(row);
     byMeeting.set(row.meetingId, list);
@@ -159,8 +205,10 @@ export async function loadCommitmentTrail(
     linkedAt: row.linkedAt ? row.linkedAt.toISOString() : null,
   });
 
-  const created = changes.described.find((e) => e.operation === "create");
-  const createdState = changes.rows.find(
+  const created = visibleChanges.described.find(
+    (e) => e.operation === "create",
+  );
+  const createdState = visibleChanges.rows.find(
     (r) => r.operation === "create",
   )?.afterState;
   const text = (key: string) =>
@@ -214,7 +262,7 @@ export async function loadCommitmentTrail(
     });
   }
 
-  for (const entry of changes.described) {
+  for (const entry of visibleChanges.described) {
     const kind = changeEventKind(entry);
     if (!kind) continue;
     events.push({

@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import { requireActor } from "../server/lib/action-context.js";
+import { invalidateAnalysisPublication } from "../server/lib/analysis-publication.js";
 import { utcToday } from "../server/lib/commitment-ledger.js";
 import {
   commitmentTrailResult,
@@ -211,6 +212,29 @@ export default defineAction({
           beforeState: before,
           afterState: after,
         });
+        const invalidated = await invalidateAnalysisPublication(
+          tx,
+          projectId,
+          meetingId,
+        );
+        if (invalidated) {
+          await tx.insert(schema.changes).values({
+            projectId,
+            entityType: "meeting",
+            entityId: meetingId,
+            actorType: actor.actorType,
+            actorId: actor.email,
+            operation: "update",
+            beforeState: {
+              analysisPublicationState: invalidated.previousState,
+              analysisContentRevision: invalidated.previousRevision,
+            },
+            afterState: {
+              analysisPublicationState: "draft",
+              analysisContentRevision: invalidated.contentRevision,
+            },
+          });
+        }
       }
 
       let duplicateRejected = false;
@@ -258,7 +282,11 @@ export default defineAction({
       .from(schema.commitments)
       .where(eq(schema.commitments.id, commitmentId))
       .limit(1);
-    const trail = await loadCommitmentTrail(saved!, input.asOf ?? utcToday());
+    const trail = await loadCommitmentTrail(
+      saved!,
+      input.asOf ?? utcToday(),
+      true,
+    );
     const linked = trail.events.some(
       (event) =>
         event.meeting?.id === meetingId &&

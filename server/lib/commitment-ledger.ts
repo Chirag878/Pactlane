@@ -1,4 +1,5 @@
-import { and, desc, eq, max } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, isNull, max, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
 import {
@@ -7,6 +8,7 @@ import {
   REVIEW_STATES,
 } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
+import { viewerVisibleChange } from "./analysis-publication.js";
 import {
   commitmentHealth,
   commitmentHealthResult,
@@ -62,9 +64,22 @@ export async function loadLedgerEntries(
   projectId: string,
   asOf: string,
   commitmentId?: string,
+  includeDraft = false,
+  db: ReturnType<typeof getDb> = getDb(),
 ): Promise<{ entries: LedgerEntry[]; truncated: boolean }> {
-  const db = getDb();
   const inProject = eq(schema.commitments.projectId, projectId);
+  const originMeeting = alias(schema.meetings, "ledger_origin_meeting");
+  const commitmentScope = and(
+    commitmentId
+      ? and(inProject, eq(schema.commitments.id, commitmentId))
+      : inProject,
+    includeDraft
+      ? undefined
+      : or(
+          isNull(schema.commitments.originMeetingId),
+          eq(originMeeting.analysisPublicationState, "published"),
+        ),
+  );
   const evidenceScope = commitmentId
     ? and(
         eq(schema.commitmentEvidence.projectId, projectId),
@@ -75,13 +90,16 @@ export async function loadLedgerEntries(
   const [commitments, evidence, meetings, people, latestChanges] =
     await Promise.all([
       db
-        .select()
+        .select(getTableColumns(schema.commitments))
         .from(schema.commitments)
-        .where(
-          commitmentId
-            ? and(inProject, eq(schema.commitments.id, commitmentId))
-            : inProject,
+        .leftJoin(
+          originMeeting,
+          and(
+            eq(originMeeting.projectId, schema.commitments.projectId),
+            eq(originMeeting.id, schema.commitments.originMeetingId),
+          ),
         )
+        .where(commitmentScope)
         .orderBy(
           desc(schema.commitments.createdAt),
           desc(schema.commitments.id),
@@ -101,6 +119,7 @@ export async function loadLedgerEntries(
           id: schema.meetings.id,
           title: schema.meetings.title,
           date: schema.meetings.meetingDate,
+          analysisPublicationState: schema.meetings.analysisPublicationState,
         })
         .from(schema.meetings)
         .where(eq(schema.meetings.projectId, projectId)),
@@ -118,89 +137,111 @@ export async function loadLedgerEntries(
           and(
             eq(schema.changes.projectId, projectId),
             eq(schema.changes.entityType, "commitment"),
+            includeDraft ? undefined : viewerVisibleChange(),
           ),
         )
         .groupBy(schema.changes.entityId),
     ]);
 
   const meetingById = new Map(meetings.map((m) => [m.id, m]));
-  const meetingDates = new Map(meetings.map((m) => [m.id, m.date]));
+  const visibleMeetingIds = new Set(
+    includeDraft
+      ? meetings.map((meeting) => meeting.id)
+      : meetings
+          .filter((meeting) => meeting.analysisPublicationState !== "draft")
+          .map((meeting) => meeting.id),
+  );
+  const visibleCommitments = commitments;
+  const visibleEvidence = evidence.filter((row) =>
+    visibleMeetingIds.has(row.meetingId),
+  );
+  const meetingDates = new Map(
+    meetings
+      .filter((meeting) => visibleMeetingIds.has(meeting.id))
+      .map((m) => [m.id, m.date]),
+  );
   const ownerNames = new Map(people.map((p) => [p.id, p.name]));
   const lastChange = new Map(latestChanges.map((c) => [c.entityId, c.at]));
   const evidenceByCommitment = new Map<string, typeof evidence>();
-  for (const row of evidence) {
+  for (const row of visibleEvidence) {
     const list = evidenceByCommitment.get(row.commitmentId) ?? [];
     list.push(row);
     evidenceByCommitment.set(row.commitmentId, list);
   }
 
-  const entries = commitments.slice(0, LEDGER_LIMIT).map((c): LedgerEntry => {
-    const rows = evidenceByCommitment.get(c.id) ?? [];
-    const health = commitmentHealth(
-      {
-        status: c.status,
-        dueDate: c.dueDate,
-        reviewState: c.reviewState,
-        needsReview: c.needsReview,
-        reviewFlags: c.reviewFlags,
-        originMeetingId: c.originMeetingId,
-        evidence: rows,
-      },
-      meetingDates,
-      asOf,
-    );
-    const verifiedMeetings = new Set(
-      rows
-        .filter((r) => r.verificationStatus === "verified")
-        .map((r) => r.meetingId),
-    );
-    const relatedIds = new Set(rows.map((r) => r.meetingId));
-    if (c.originMeetingId) relatedIds.add(c.originMeetingId);
-    const related = [...relatedIds]
-      .flatMap((id) => {
-        const meeting = meetingById.get(id);
-        return meeting
-          ? [{ ...meeting, verified: verifiedMeetings.has(id) }]
-          : [];
-      })
-      .sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-    const verified = rows.filter(
-      (r) => r.verificationStatus === "verified",
-    ).length;
-    const origin = c.originMeetingId
-      ? meetingById.get(c.originMeetingId)
-      : undefined;
+  const entries = visibleCommitments
+    .slice(0, LEDGER_LIMIT)
+    .map((c): LedgerEntry => {
+      const rows = evidenceByCommitment.get(c.id) ?? [];
+      const health = commitmentHealth(
+        {
+          status: c.status,
+          dueDate: c.dueDate,
+          reviewState: c.reviewState,
+          needsReview: c.needsReview,
+          reviewFlags: c.reviewFlags,
+          originMeetingId: c.originMeetingId,
+          evidence: rows,
+        },
+        meetingDates,
+        asOf,
+      );
+      const verifiedMeetings = new Set(
+        rows
+          .filter((r) => r.verificationStatus === "verified")
+          .map((r) => r.meetingId),
+      );
+      const relatedIds = new Set(rows.map((r) => r.meetingId));
+      if (c.originMeetingId) relatedIds.add(c.originMeetingId);
+      const related = [...relatedIds]
+        .flatMap((id) => {
+          const meeting = meetingById.get(id);
+          return meeting
+            ? [{ ...meeting, verified: verifiedMeetings.has(id) }]
+            : [];
+        })
+        .sort(
+          (a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id),
+        );
+      const verified = rows.filter(
+        (r) => r.verificationStatus === "verified",
+      ).length;
+      const origin = c.originMeetingId
+        ? meetingById.get(c.originMeetingId)
+        : undefined;
 
-    return {
-      id: c.id,
-      projectId: c.projectId,
-      description: c.description,
-      originMeeting: origin ?? null,
-      ownerId: c.ownerId,
-      ownerDisplayName: c.ownerId ? (ownerNames.get(c.ownerId) ?? null) : null,
-      statedOwnerName: c.statedOwnerName,
-      dueDate: c.dueDate,
-      statedDueText: c.statedDueText,
-      priority: c.priority,
-      status: c.status,
-      reviewState: c.reviewState,
-      evidence: {
-        total: rows.length,
-        verified,
-        notVerified: rows.length - verified,
-      },
-      meetings: related,
-      lastUpdatedAt: new Date(
-        lastChange.get(c.id) ?? c.updatedAt,
-      ).toISOString(),
-      health,
-    };
-  });
+      return {
+        id: c.id,
+        projectId: c.projectId,
+        description: c.description,
+        originMeeting: origin ?? null,
+        ownerId: c.ownerId,
+        ownerDisplayName: c.ownerId
+          ? (ownerNames.get(c.ownerId) ?? null)
+          : null,
+        statedOwnerName: c.statedOwnerName,
+        dueDate: c.dueDate,
+        statedDueText: c.statedDueText,
+        priority: c.priority,
+        status: c.status,
+        reviewState: c.reviewState,
+        evidence: {
+          total: rows.length,
+          verified,
+          notVerified: rows.length - verified,
+        },
+        meetings: related,
+        lastUpdatedAt: new Date(
+          lastChange.get(c.id) ?? c.updatedAt,
+        ).toISOString(),
+        health,
+      };
+    });
 
   entries.sort(
     (a, b) =>
       b.lastUpdatedAt.localeCompare(a.lastUpdatedAt) ||
       a.id.localeCompare(b.id),
   );
-  return { entries, truncated: commitments.length > LEDGER_LIMIT };
+  return { entries, truncated: visibleCommitments.length > LEDGER_LIMIT };
 }

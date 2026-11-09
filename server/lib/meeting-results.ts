@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import {
   ANALYSIS_BASES,
+  ANALYSIS_PUBLICATION_STATES,
   COMMITMENT_PRIORITIES,
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
@@ -93,6 +94,17 @@ export const meetingResultSchema = z.object({
   summary: z.string().nullable(),
   processingStatus: z.enum(MEETING_PROCESSING_STATUSES),
   analysisSaved: z.boolean(),
+  analysisVisible: z
+    .boolean()
+    .describe(
+      "False when a viewer can see the meeting but its AI analysis remains a private draft",
+    ),
+  analysisPublicationState: z.enum(ANALYSIS_PUBLICATION_STATES),
+  analysisContentRevision: z.number().int().min(0),
+  analysisPublishedBy: z.string().nullable(),
+  analysisPublishedAt: z.string().nullable(),
+  analysisPublishedRevision: z.number().int().min(0).nullable(),
+  canPublish: z.boolean(),
   decisions: z.array(decisionResult),
   commitments: z.array(commitmentResult),
   openQuestions: z.array(findingResult),
@@ -208,9 +220,43 @@ export async function loadCommitmentResult(
 /** Call only after authorizing the caller against the meeting's project. */
 export async function loadMeetingResult(
   meeting: Meeting,
+  options: { includeDraft?: boolean; canPublish?: boolean } = {},
+  db: ReturnType<typeof getDb> = getDb(),
 ): Promise<MeetingResult> {
-  const db = getDb();
   const { projectId, id: meetingId } = meeting;
+  const analysisVisible =
+    meeting.analysisPublicationState === "published" ||
+    options.includeDraft === true;
+
+  // The meeting and its original transcript remain visible to an authorized
+  // viewer. AI-generated rows stay private until an editor publishes them.
+  if (!analysisVisible) {
+    return {
+      id: meetingId,
+      projectId,
+      title: meeting.title,
+      meetingDate: meeting.meetingDate,
+      transcript: meeting.transcript,
+      summary: null,
+      processingStatus: meeting.processingStatus,
+      analysisSaved: meeting.analysisHash !== null,
+      analysisVisible: false,
+      analysisPublicationState: meeting.analysisPublicationState,
+      // The internal revision count is review metadata. A viewer only needs to
+      // know that the analysis is not yet visible, not how often it changed.
+      analysisContentRevision: 0,
+      analysisPublishedBy: null,
+      analysisPublishedAt: null,
+      analysisPublishedRevision: null,
+      canPublish: false,
+      decisions: [],
+      commitments: [],
+      openQuestions: [],
+      blockers: [],
+      nextMeeting: null,
+      linkedCommitments: [],
+    };
+  }
 
   const [
     commitments,
@@ -320,10 +366,41 @@ export async function loadMeetingResult(
           ),
         )
     : [];
+  const linkedOriginIds = [
+    ...new Set(
+      linkedCommitments.flatMap((commitment) =>
+        commitment.originMeetingId ? [commitment.originMeetingId] : [],
+      ),
+    ),
+  ];
+  const linkedOrigins = linkedOriginIds.length
+    ? await db
+        .select({
+          id: schema.meetings.id,
+          publicationState: schema.meetings.analysisPublicationState,
+        })
+        .from(schema.meetings)
+        .where(
+          and(
+            eq(schema.meetings.projectId, projectId),
+            inArray(schema.meetings.id, linkedOriginIds),
+          ),
+        )
+    : [];
+  const linkedOriginStates = new Map(
+    linkedOrigins.map((origin) => [origin.id, origin.publicationState]),
+  );
+  const visibleLinkedCommitments = options.includeDraft
+    ? linkedCommitments
+    : linkedCommitments.filter(
+        (commitment) =>
+          !commitment.originMeetingId ||
+          linkedOriginStates.get(commitment.originMeetingId) !== "draft",
+      );
 
   const ownerIds = [
     ...new Set(
-      [...commitments, ...linkedCommitments].flatMap((c) =>
+      [...commitments, ...visibleLinkedCommitments].flatMap((c) =>
         c.ownerId ? [c.ownerId] : [],
       ),
     ),
@@ -369,6 +446,15 @@ export async function loadMeetingResult(
     summary: meeting.summary,
     processingStatus: meeting.processingStatus,
     analysisSaved: meeting.analysisHash !== null,
+    analysisVisible: true,
+    analysisPublicationState: meeting.analysisPublicationState,
+    analysisContentRevision: meeting.analysisContentRevision,
+    analysisPublishedBy: meeting.analysisPublishedBy,
+    analysisPublishedAt: meeting.analysisPublishedAt
+      ? meeting.analysisPublishedAt.toISOString()
+      : null,
+    analysisPublishedRevision: meeting.analysisPublishedRevision,
+    canPublish: options.canPublish === true,
     decisions: inTranscriptOrder(
       decisions.map((d) => ({
         id: d.id,
@@ -419,6 +505,8 @@ export async function loadMeetingResult(
           evidence: evidenceByNextMeeting.get(nextMeetingRows[0].id) ?? [],
         }
       : null,
-    linkedCommitments: inTranscriptOrder(linkedCommitments.map(asResult)),
+    linkedCommitments: inTranscriptOrder(
+      visibleLinkedCommitments.map(asResult),
+    ),
   };
 }

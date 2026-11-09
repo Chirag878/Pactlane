@@ -1,10 +1,14 @@
-import { defineAction } from "@agent-native/core/action";
+import { defineAction, fail } from "@agent-native/core/action";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeCommitment,
+  authorizeProject,
   requireActor,
 } from "../server/lib/action-context.js";
+import { commitmentIsPublished } from "../server/lib/analysis-publication.js";
 import { utcToday } from "../server/lib/commitment-ledger.js";
 import {
   commitmentTrailResult,
@@ -29,6 +33,41 @@ export default defineAction({
   run: async ({ id, asOf }, ctx) => {
     requireActor(ctx);
     const commitment = await authorizeCommitment(id, "viewer");
-    return loadCommitmentTrail(commitment, asOf ?? utcToday());
+    const access = await authorizeProject(commitment.projectId, "viewer");
+    const includeDraft = access.role !== "viewer";
+    return getDb().transaction(
+      async (tx) => {
+        const [snapshotCommitment] = await tx
+          .select()
+          .from(schema.commitments)
+          .where(
+            and(
+              eq(schema.commitments.id, commitment.id),
+              eq(schema.commitments.projectId, commitment.projectId),
+            ),
+          )
+          .limit(1);
+        if (
+          !snapshotCommitment ||
+          (!includeDraft &&
+            !(await commitmentIsPublished(snapshotCommitment, tx)))
+        ) {
+          fail(
+            "This project does not exist or you do not have the required access.",
+            {
+              errorCode: "access_denied",
+              statusCode: 403,
+            },
+          );
+        }
+        return loadCommitmentTrail(
+          snapshotCommitment,
+          asOf ?? utcToday(),
+          includeDraft,
+          tx,
+        );
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   },
 });

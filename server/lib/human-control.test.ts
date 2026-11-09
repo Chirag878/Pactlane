@@ -10,6 +10,7 @@ import createProject from "../../actions/create-project.js";
 import getCommitmentHistory from "../../actions/get-commitment-history.js";
 import getMeeting from "../../actions/get-meeting.js";
 import listPeople from "../../actions/list-people.js";
+import publishMeetingAnalysis from "../../actions/publish-meeting-analysis.js";
 import reviewCommitment from "../../actions/review-commitment.js";
 import saveAnalysis from "../../actions/save-analysis.js";
 import updateCommitment from "../../actions/update-commitment.js";
@@ -554,7 +555,11 @@ describe("update-commitment", () => {
     });
 
     it("is readable by a viewer and hidden from everyone else", async () => {
-      const { projectId, priya } = await setUp();
+      const { projectId, meeting, priya } = await setUp();
+      await call(publishMeetingAnalysis, {
+        meetingId: meeting.id,
+        expectedContentRevision: 1,
+      });
       await getDb().insert(schema.projectShares).values({
         id: crypto.randomUUID(),
         resourceId: projectId,
@@ -797,30 +802,33 @@ describe("review", () => {
     "cli",
     "http",
     "mcp-widget-write",
-  ] as ActionCaller[])("refuses the %s caller before review", async (caller) => {
-    const { priya } = await setUp();
-    const error = await rejection(review(priya, "reject", [], caller));
-    expect(error).toMatchObject({
-      errorCode: "ui_only_action",
-      statusCode: 403,
-    });
+  ] as ActionCaller[])(
+    "refuses the %s caller before review",
+    async (caller) => {
+      const { priya } = await setUp();
+      const error = await rejection(review(priya, "reject", [], caller));
+      expect(error).toMatchObject({
+        errorCode: "ui_only_action",
+        statusCode: 403,
+      });
 
-    const [stored] = await getDb()
-      .select()
-      .from(schema.commitments)
-      .where(eq(schema.commitments.id, priya.id));
-    expect(stored).toMatchObject({
-      version: priya.version,
-      reviewState: priya.reviewState,
-      reviewedBy: null,
-    });
-    expect(
-      reviewCommitment as unknown as {
-        agentTool?: boolean;
-        uiOnly?: boolean;
-      },
-    ).toMatchObject({ agentTool: false, uiOnly: true });
-  });
+      const [stored] = await getDb()
+        .select()
+        .from(schema.commitments)
+        .where(eq(schema.commitments.id, priya.id));
+      expect(stored).toMatchObject({
+        version: priya.version,
+        reviewState: priya.reviewState,
+        reviewedBy: null,
+      });
+      expect(
+        reviewCommitment as unknown as {
+          agentTool?: boolean;
+          uiOnly?: boolean;
+        },
+      ).toMatchObject({ agentTool: false, uiOnly: true });
+    },
+  );
 
   it("denies review to a user without editor access", async () => {
     const { priya } = await setUp();

@@ -8,6 +8,7 @@ import {
   requireActor,
 } from "../server/lib/action-context.js";
 import { MEETING_PROCESSING_STATUSES } from "../shared/domain.js";
+import { ANALYSIS_PUBLICATION_STATES } from "../shared/domain.js";
 
 export default defineAction({
   description:
@@ -24,6 +25,7 @@ export default defineAction({
         title: z.string(),
         meetingDate: z.string(),
         processingStatus: z.enum(MEETING_PROCESSING_STATUSES),
+        analysisPublicationState: z.enum(ANALYSIS_PUBLICATION_STATES),
       }),
     ),
   }),
@@ -36,6 +38,7 @@ export default defineAction({
         title: schema.meetings.title,
         meetingDate: schema.meetings.meetingDate,
         processingStatus: schema.meetings.processingStatus,
+        analysisPublicationState: schema.meetings.analysisPublicationState,
       })
       .from(schema.meetings)
       .where(eq(schema.meetings.projectId, projectId))

@@ -433,4 +433,91 @@ CREATE INDEX IF NOT EXISTS next_meeting_evidence_suggestion_idx
   ON next_meeting_evidence (project_id, suggestion_id, created_at);
 `,
   },
+  {
+    version: 6,
+    name: "pactlane-analysis-publication",
+    sql: `
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_publication_state TEXT NOT NULL DEFAULT 'published';
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_published_by TEXT;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_published_at TIMESTAMPTZ;
+
+ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_analysis_publication_state_check;
+ALTER TABLE meetings ADD CONSTRAINT meetings_analysis_publication_state_check
+  CHECK (analysis_publication_state IN ('draft', 'published'));
+ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_analysis_publication_attribution_check;
+ALTER TABLE meetings ADD CONSTRAINT meetings_analysis_publication_attribution_check
+  CHECK (
+    (analysis_published_by IS NULL) = (analysis_published_at IS NULL)
+  );
+
+CREATE INDEX IF NOT EXISTS meetings_project_analysis_publication_idx
+  ON meetings (project_id, analysis_publication_state);
+`,
+  },
+  {
+    version: 7,
+    name: "pactlane-publication-revision",
+    sql: `
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_content_revision INTEGER;
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS analysis_published_revision INTEGER;
+
+UPDATE meetings
+SET analysis_content_revision = CASE
+      WHEN analysis_hash IS NOT NULL THEN 1
+      ELSE 0
+    END
+WHERE analysis_content_revision IS NULL;
+
+-- V6 marked every pre-existing meeting published. Only analyzed legacy rows
+-- retain that visibility; an empty meeting has no analysis to publish.
+UPDATE meetings
+SET analysis_publication_state = 'draft',
+    analysis_published_by = NULL,
+    analysis_published_at = NULL,
+    analysis_published_revision = NULL
+WHERE analysis_hash IS NULL;
+
+-- A publication attributed by v6 approved the then-current content. Material
+-- edits in that application version already retracted the meeting to draft.
+UPDATE meetings
+SET analysis_published_revision = analysis_content_revision
+WHERE analysis_publication_state = 'published'
+  AND analysis_published_by IS NOT NULL
+  AND analysis_published_at IS NOT NULL
+  AND analysis_published_revision IS NULL;
+
+ALTER TABLE meetings ALTER COLUMN analysis_publication_state SET DEFAULT 'draft';
+ALTER TABLE meetings ALTER COLUMN analysis_content_revision SET DEFAULT 0;
+ALTER TABLE meetings ALTER COLUMN analysis_content_revision SET NOT NULL;
+
+ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_analysis_content_revision_check;
+ALTER TABLE meetings ADD CONSTRAINT meetings_analysis_content_revision_check
+  CHECK (analysis_content_revision >= 0);
+ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_analysis_publication_attribution_check;
+ALTER TABLE meetings ADD CONSTRAINT meetings_analysis_publication_attribution_check
+  CHECK (
+    (
+      analysis_publication_state = 'draft'
+      AND analysis_published_by IS NULL
+      AND analysis_published_at IS NULL
+      AND analysis_published_revision IS NULL
+    )
+    OR (
+      analysis_publication_state = 'published'
+      AND (
+        (
+          analysis_published_by IS NULL
+          AND analysis_published_at IS NULL
+          AND analysis_published_revision IS NULL
+        )
+        OR (
+          analysis_published_by IS NOT NULL
+          AND analysis_published_at IS NOT NULL
+          AND analysis_published_revision = analysis_content_revision
+        )
+      )
+    )
+  );
+`,
+  },
 ];

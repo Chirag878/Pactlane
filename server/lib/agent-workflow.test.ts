@@ -11,6 +11,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import createMeeting from "../../actions/create-meeting.js";
 import createProject from "../../actions/create-project.js";
 import getMeeting from "../../actions/get-meeting.js";
+import linkEvidence from "../../actions/link-commitment-evidence.js";
 import saveAnalysis from "../../actions/save-analysis.js";
 import { getDb, schema } from "../db/index.js";
 import { migrations } from "../db/migrations.js";
@@ -93,7 +94,7 @@ async function setUpMeeting() {
   });
 }
 
-function runLoop(script: Script, userEmail = OWNER) {
+function runLoop(script: Script, userEmail = OWNER, registry = actions) {
   const events: { type: string; [key: string]: unknown }[] = [];
   return Promise.resolve(
     runWithRequestContext({ userEmail }, () =>
@@ -101,9 +102,9 @@ function runLoop(script: Script, userEmail = OWNER) {
         engine: scriptedEngine(script) as never,
         model: "scripted",
         systemPrompt: "test",
-        tools: actionsToEngineTools(actions),
+        tools: actionsToEngineTools(registry),
         messages: [{ role: "user", content: [{ type: "text", text: "Go" }] }],
-        actions,
+        actions: registry,
         send: (event) => {
           events.push(event as never);
         },
@@ -140,6 +141,40 @@ describe("agent tool exposure", () => {
       "summary",
     ]);
   });
+});
+
+describe("human approval", () => {
+  it("cannot be reached from the agent loop, even if the tool is called", async () => {
+    const meeting = await setUpMeeting();
+    const withLink = loadActionsFromStaticRegistry({
+      "link-commitment-evidence": { default: linkEvidence },
+    });
+    let outcome: { content: string; isError?: boolean } | undefined;
+
+    await runLoop(
+      ({ messages }) => {
+        const result = lastToolResult(messages);
+        if (!result) {
+          return toolCall("call-1", "link-commitment-evidence", {
+            commitmentId: "any",
+            meetingId: meeting.id,
+            quote: "Aarav will prepare the presentation.",
+          });
+        }
+        outcome = result;
+        return [{ type: "stop", reason: "end_turn" }];
+      },
+      OWNER,
+      withLink,
+    );
+
+    expect(outcome?.isError).toBe(true);
+    const linked = await getDb()
+      .select()
+      .from(schema.commitmentEvidence)
+      .where(eq(schema.commitmentEvidence.meetingId, meeting.id));
+    expect(linked).toEqual([]);
+  }, 60_000);
 });
 
 describe("agent loop", () => {

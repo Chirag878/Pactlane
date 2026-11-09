@@ -15,7 +15,8 @@ export function isProjectAreaPath(pathname: string): boolean {
   return (
     pathname === PROJECTS_PATH ||
     pathname.startsWith(`${PROJECTS_PATH}/`) ||
-    pathname.startsWith("/meetings/")
+    pathname.startsWith("/meetings/") ||
+    pathname.startsWith("/commitments/")
   );
 }
 

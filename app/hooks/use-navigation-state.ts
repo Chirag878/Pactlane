@@ -21,6 +21,7 @@ export interface NavigationState {
   threadId?: string;
   projectId?: string;
   meetingId?: string;
+  commitmentId?: string;
 }
 
 export function useNavigationState() {
@@ -69,6 +70,7 @@ export function navigationStateForPath(pathname: string): NavigationState {
   const threadId = threadIdFromPath(pathname);
   const projectId = pathname.match(/^\/projects\/([^/]+)/)?.[1];
   const meetingId = pathname.match(/^\/meetings\/([^/]+)/)?.[1];
+  const commitmentId = pathname.match(/^\/commitments\/([^/]+)/)?.[1];
   return {
     view: viewForPath(pathname),
     path: pathname,
@@ -76,12 +78,14 @@ export function navigationStateForPath(pathname: string): NavigationState {
     ...(threadId ? { threadId } : {}),
     ...(projectId ? { projectId } : {}),
     ...(meetingId ? { meetingId } : {}),
+    ...(commitmentId ? { commitmentId } : {}),
   };
 }
 
 function viewForPath(pathname: string): string {
   if (isChatPathname(pathname)) return "chat";
   if (pathname.startsWith("/meetings/")) return "meeting";
+  if (pathname.startsWith("/commitments/")) return "commitment";
   if (pathname === PROJECTS_PATH || pathname.startsWith(`${PROJECTS_PATH}/`)) {
     return "projects";
   }

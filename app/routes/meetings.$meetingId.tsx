@@ -7,73 +7,80 @@ import {
   useActionQuery,
 } from "@agent-native/core/client/hooks";
 import { buildSettingsRoute } from "@agent-native/core/client/navigation";
-import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { useMemo, useRef, useState } from "react";
+import { Link, useParams, useSearchParams } from "react-router";
 
+import { CommitmentCard } from "@/components/meetings/CommitmentCard";
+import {
+  EvidenceList,
+  summarizeEvidence,
+} from "@/components/meetings/EvidenceList";
+import {
+  LinkReviewPanel,
+  type InspectRange,
+} from "@/components/meetings/LinkReviewPanel";
+import { TranscriptPanel } from "@/components/meetings/TranscriptPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export function meta() {
   return [{ title: "Meeting - Pactlane" }];
 }
 
-const EVIDENCE_LABELS = {
-  verified: { label: "Verified in transcript", variant: "secondary" },
-  missing: { label: "Not found in transcript", variant: "destructive" },
-  ambiguous: { label: "Occurs more than once", variant: "destructive" },
-  unverified: { label: "Unverified", variant: "outline" },
-} as const;
-
-type EvidenceStatus = keyof typeof EVIDENCE_LABELS;
-
-interface EvidenceItem {
-  id: string;
-  sourceQuote: string;
-  verificationStatus: EvidenceStatus;
-}
-
-function EvidenceList({ evidence }: { evidence: EvidenceItem[] }) {
-  if (evidence.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No supporting quotation.</p>
-    );
-  }
-  return (
-    <ul className="flex flex-col gap-2">
-      {evidence.map((item) => {
-        const status = EVIDENCE_LABELS[item.verificationStatus];
-        return (
-          <li key={item.id} className="flex flex-col items-start gap-1">
-            <blockquote className="border-s-2 border-border ps-3 text-sm">
-              {item.sourceQuote}
-            </blockquote>
-            <Badge variant={status.variant}>{status.label}</Badge>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-function ReviewNotice({ reason }: { reason: string | null }) {
-  return (
-    <div className="flex flex-col items-start gap-1">
-      <Badge variant="destructive">Needs review</Badge>
-      {reason ? <p className="text-sm">{reason}</p> : null}
-    </div>
-  );
-}
+const NO_EVIDENCE: never[] = [];
 
 export default function MeetingRoute() {
   const { meetingId = "" } = useParams();
   const [analysisState, setAnalysisState] = useState<
     "idle" | "checking" | "missing" | "unavailable"
   >("idle");
+  const [searchParams] = useSearchParams();
+  // A link from the Trail arrives with the item whose source should be shown.
+  const [selectedId, setSelectedId] = useState<string | null>(
+    searchParams.get("highlight"),
+  );
+  const [inspected, setInspected] = useState<InspectRange | null>(null);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+
   const {
     data: meeting,
     isLoading,
     error,
+    refetch,
   } = useActionQuery("get-meeting", { id: meetingId });
+  const { data: people = [] } = useActionQuery(
+    "list-people",
+    { projectId: meeting?.projectId ?? "" },
+    { enabled: Boolean(meeting) },
+  );
+
+  const selected = useMemo(() => {
+    if (!meeting || !selectedId) return null;
+    return (
+      [
+        ...meeting.decisions,
+        ...meeting.commitments,
+        ...meeting.linkedCommitments,
+      ].find((item) => item.id === selectedId) ?? null
+    );
+  }, [meeting, selectedId]);
+
+  // Offsets come from the server's match and are re-checked before highlighting.
+  const transcriptEvidence = useMemo(
+    () =>
+      inspected
+        ? [
+            {
+              sourceQuote: inspected.quote,
+              sourceStart: inspected.start,
+              sourceEnd: inspected.end,
+              verificationStatus: "verified",
+            },
+          ]
+        : (selected?.evidence ?? NO_EVIDENCE),
+    [inspected, selected],
+  );
 
   if (error) {
     return (
@@ -113,15 +120,33 @@ export default function MeetingRoute() {
     setAnalysisState("idle");
   }
 
+  // On a narrow screen the transcript sits below, so bring it into view.
+  function revealTranscript() {
+    if (!window.matchMedia("(min-width: 1024px)").matches) {
+      transcriptRef.current?.scrollIntoView({ block: "start" });
+    }
+  }
+
+  function select(id: string) {
+    setInspected(null);
+    const same = selectedId === id;
+    setSelectedId(same ? null : id);
+    if (!same) revealTranscript();
+  }
+
   const items = [...meeting.decisions, ...meeting.commitments];
-  const reviewCount = items.filter((item) => item.needsReview).length;
-  const unverifiedCount = items
+  const pending = items.filter((item) => item.needsReview).length;
+  // A rejected commitment no longer asks for attention, so its quotations are not counted.
+  const unverified = [
+    ...meeting.decisions,
+    ...meeting.commitments.filter((c) => c.reviewState !== "rejected"),
+  ]
     .flatMap((item) => item.evidence)
     .filter((e) => e.verificationStatus !== "verified").length;
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-8 p-6">
-      <div className="flex flex-col gap-1">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6">
+      <header className="flex flex-col gap-1">
         <Link
           to={`/projects/${meeting.projectId}`}
           className="text-sm text-muted-foreground hover:underline"
@@ -130,117 +155,226 @@ export default function MeetingRoute() {
         </Link>
         <h1 className="text-xl font-semibold">{meeting.title}</h1>
         <p className="text-sm text-muted-foreground">{meeting.meetingDate}</p>
-      </div>
+      </header>
 
       {meeting.analysisSaved ? (
-        <>
-          {reviewCount > 0 || unverifiedCount > 0 ? (
-            <p className="text-sm font-medium">
-              {reviewCount} item{reviewCount === 1 ? "" : "s"} need review
-              {unverifiedCount > 0
-                ? `, ${unverifiedCount} quotation${unverifiedCount === 1 ? "" : "s"} not verified`
-                : ""}
-              .
-            </p>
-          ) : null}
-
-          <section className="flex flex-col gap-2">
-            <h2 className="text-base font-semibold">Summary</h2>
-            <p className="text-sm">{meeting.summary}</p>
-          </section>
-
-          <section className="flex flex-col gap-4">
-            <h2 className="text-base font-semibold">Decisions</h2>
-            {meeting.decisions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None recorded.</p>
-            ) : (
-              meeting.decisions.map((decision) => (
-                <article key={decision.id} className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">{decision.description}</p>
-                  {decision.needsReview ? (
-                    <ReviewNotice reason={decision.reviewReason} />
-                  ) : null}
-                  <EvidenceList evidence={decision.evidence} />
-                </article>
-              ))
+        <section
+          aria-labelledby="overview-heading"
+          className="flex flex-col gap-3"
+        >
+          <h2 id="overview-heading" className="text-base font-semibold">
+            Overview
+          </h2>
+          <p className="max-w-3xl text-sm">{meeting.summary}</p>
+          <p
+            role="status"
+            className={cn(
+              "text-sm",
+              pending > 0 || unverified > 0
+                ? "font-medium"
+                : "text-muted-foreground",
             )}
-          </section>
-
-          <section className="flex flex-col gap-4">
-            <h2 className="text-base font-semibold">Commitments</h2>
-            {meeting.commitments.length === 0 ? (
-              <p className="text-sm text-muted-foreground">None recorded.</p>
-            ) : (
-              meeting.commitments.map((commitment) => (
-                <article key={commitment.id} className="flex flex-col gap-2">
-                  <p className="text-sm font-medium">
-                    {commitment.description}
-                  </p>
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-                    <dt className="text-muted-foreground">Owner</dt>
-                    <dd>
-                      {commitment.ownerDisplayName ??
-                        commitment.statedOwnerName ??
-                        "Unassigned"}
-                    </dd>
-                    <dt className="text-muted-foreground">Due</dt>
-                    <dd>
-                      {commitment.dueDate ?? "No date"}
-                      {commitment.statedDueText
-                        ? ` (said: "${commitment.statedDueText}")`
-                        : ""}
-                    </dd>
-                    {commitment.priority ? (
-                      <>
-                        <dt className="text-muted-foreground">Priority</dt>
-                        <dd className="capitalize">{commitment.priority}</dd>
-                      </>
-                    ) : null}
-                  </dl>
-                  {commitment.needsReview ? (
-                    <ReviewNotice reason={commitment.reviewReason} />
-                  ) : null}
-                  <EvidenceList evidence={commitment.evidence} />
-                </article>
-              ))
-            )}
-          </section>
-        </>
-      ) : (
-        <div className="flex flex-col items-start gap-2">
-          <p className="text-sm text-muted-foreground">
-            This meeting has not been analyzed yet.
-          </p>
-          <Button
-            type="button"
-            onClick={requestAnalysis}
-            disabled={analysisState === "checking"}
           >
-            {analysisState === "checking" ? "Checking AI setup…" : "Analyze with AI"}
-          </Button>
-          {analysisState === "missing" ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              AI configuration is required before this meeting can be analyzed.{' '}
-              <Link to={buildSettingsRoute("model")} className="underline">
-                Connect a model in Agent settings
-              </Link>
-              , then return here and select Analyze with AI once.
-            </p>
-          ) : null}
-          {analysisState === "unavailable" ? (
-            <p role="alert" className="text-sm text-destructive">
-              AI setup could not be verified. Check your model connection and try again; no analysis was submitted.
-            </p>
-          ) : null}
-        </div>
-      )}
+            {pending > 0 || unverified > 0
+              ? `${pending} item${pending === 1 ? "" : "s"} need review, ${unverified} quotation${unverified === 1 ? "" : "s"} not verified against the transcript.`
+              : "Everything here has verified evidence and nothing needs review."}
+          </p>
+        </section>
+      ) : null}
 
-      <details>
-        <summary className="cursor-pointer text-sm font-medium">
-          Transcript
-        </summary>
-        <p className="mt-2 whitespace-pre-wrap text-sm">{meeting.transcript}</p>
-      </details>
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,5fr)_minmax(0,6fr)] lg:items-start">
+        <div
+          ref={transcriptRef}
+          className="order-2 scroll-mt-4 lg:sticky lg:top-6 lg:order-1"
+        >
+          <TranscriptPanel
+            transcript={meeting.transcript ?? ""}
+            evidence={transcriptEvidence}
+            heading={
+              inspected
+                ? "the suggested statement"
+                : (selected?.description ?? null)
+            }
+          />
+        </div>
+
+        <div className="order-1 flex flex-col gap-8 lg:order-2">
+          {meeting.transcript ? (
+            <LinkReviewPanel
+              meetingId={meeting.id}
+              projectId={meeting.projectId}
+              meetingDate={meeting.meetingDate}
+              onInspect={(range) => {
+                setSelectedId(null);
+                setInspected(range);
+                revealTranscript();
+              }}
+            />
+          ) : null}
+
+          {meeting.linkedCommitments.length > 0 ? (
+            <section
+              aria-labelledby="linked-heading"
+              className="flex flex-col gap-3"
+            >
+              <h2 id="linked-heading" className="text-base font-semibold">
+                Earlier commitments discussed here
+              </h2>
+              {meeting.linkedCommitments.map((commitment) => {
+                const isSelected = selectedId === commitment.id;
+                return (
+                  <article
+                    key={commitment.id}
+                    className={cn(
+                      "flex flex-col gap-2 rounded-lg border p-4",
+                      isSelected && "border-primary/60 bg-primary/[0.03]",
+                    )}
+                  >
+                    <h3 className="text-sm font-medium">
+                      <button
+                        type="button"
+                        aria-pressed={isSelected}
+                        title="Show the source in the transcript"
+                        className="text-start hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => select(commitment.id)}
+                      >
+                        {commitment.description}
+                      </button>
+                    </h3>
+                    <EvidenceList evidence={commitment.evidence} />
+                    <Link
+                      to={`/commitments/${commitment.id}`}
+                      className="self-start text-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                    >
+                      View trail across meetings
+                    </Link>
+                  </article>
+                );
+              })}
+            </section>
+          ) : null}
+
+          {meeting.analysisSaved ? (
+            <>
+              <section
+                aria-labelledby="decisions-heading"
+                className="flex flex-col gap-3"
+              >
+                <h2 id="decisions-heading" className="text-base font-semibold">
+                  Decisions
+                </h2>
+                {meeting.decisions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    None recorded.
+                  </p>
+                ) : (
+                  meeting.decisions.map((decision) => {
+                    const evidence = summarizeEvidence(decision.evidence);
+                    const isSelected = selectedId === decision.id;
+                    return (
+                      <article
+                        key={decision.id}
+                        className={cn(
+                          "flex flex-col gap-2 rounded-lg border p-4",
+                          isSelected && "border-primary/60 bg-primary/[0.03]",
+                        )}
+                      >
+                        <h3 className="text-sm font-medium">
+                          <button
+                            type="button"
+                            aria-pressed={isSelected}
+                            title="Show the source in the transcript"
+                            className="text-start hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            onClick={() => select(decision.id)}
+                          >
+                            {decision.description}
+                          </button>
+                        </h3>
+                        <div className="flex flex-wrap gap-1.5">
+                          <Badge variant={evidence.variant}>
+                            {evidence.label}
+                          </Badge>
+                          {decision.needsReview ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-500/60 text-amber-700 dark:text-amber-400"
+                            >
+                              Needs review
+                            </Badge>
+                          ) : null}
+                        </div>
+                        {decision.needsReview && decision.reviewReason ? (
+                          <p className="text-sm">{decision.reviewReason}</p>
+                        ) : null}
+                        <EvidenceList evidence={decision.evidence} />
+                      </article>
+                    );
+                  })
+                )}
+              </section>
+
+              <section
+                aria-labelledby="commitments-heading"
+                className="flex flex-col gap-3"
+              >
+                <h2
+                  id="commitments-heading"
+                  className="text-base font-semibold"
+                >
+                  Commitments
+                </h2>
+                {meeting.commitments.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    None recorded.
+                  </p>
+                ) : (
+                  meeting.commitments.map((commitment) => (
+                    <CommitmentCard
+                      key={commitment.id}
+                      commitment={commitment}
+                      people={people}
+                      selected={selectedId === commitment.id}
+                      onSelect={() => select(commitment.id)}
+                      onReloadLatest={() => void refetch()}
+                    />
+                  ))
+                )}
+              </section>
+            </>
+          ) : (
+            <div className="flex flex-col items-start gap-2">
+              <p className="text-sm text-muted-foreground">
+                This meeting has not been analyzed yet.
+              </p>
+              <Button
+                type="button"
+                onClick={requestAnalysis}
+                disabled={analysisState === "checking"}
+              >
+                {analysisState === "checking"
+                  ? "Checking AI setup…"
+                  : "Analyze with AI"}
+              </Button>
+              {analysisState === "missing" ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  AI configuration is required before this meeting can be
+                  analyzed.{" "}
+                  <Link to={buildSettingsRoute("model")} className="underline">
+                    Connect a model in Agent settings
+                  </Link>
+                  , then return here and select Analyze with AI once.
+                </p>
+              ) : null}
+              {analysisState === "unavailable" ? (
+                <p role="alert" className="text-sm text-destructive">
+                  AI setup could not be verified. Check your model connection
+                  and try again; no analysis was submitted.
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

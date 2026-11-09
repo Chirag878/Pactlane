@@ -4,17 +4,17 @@
 
 Pactlane is an AI-native commitment manager for small teams. It turns meeting conversations into verifiable commitments, then follows each one across later meetings so nothing quietly slips.
 
-> **Status: Phases 0 to 3 and the Phase 5 summary-first meeting checkpoint are built locally.** A person can store meetings, save structured meeting intelligence with server-verified evidence, correct and review commitments, and follow one commitment across meetings by confirming suggested links. **Calendar creation, agent proposals, undo and follow-up delivery are not built, and real-model extraction still requires independent verification.** See [Current completion status](#current-completion-status).
+> **Status: Phases 0 to 3 and Phase 5 review/publishing are built locally.** A person can store meetings, save structured meeting intelligence as a private draft with server-verified evidence, review and publish it, correct and review commitments, and follow one commitment across meetings by confirming suggested links. **Calendar creation, agent proposals, undo and follow-up delivery are not built, and real-model extraction still requires independent verification.** See [Current completion status](#current-completion-status).
 
-| Read this | For |
-| --- | --- |
+| Read this                                    | For                                                       |
+| -------------------------------------------- | --------------------------------------------------------- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, domain model, proposed actions, invariants |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Cloudflare and Supabase runbook, risks, smoke tests |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Phases, cut lines, the hackathon deadline |
-| [docs/DECISIONS.md](docs/DECISIONS.md) | Why the architecture is the way it is |
-| [docs/DEMO.md](docs/DEMO.md) | The three-meeting demo and submission requirements |
-| [docs/IDEAS.md](docs/IDEAS.md) | Parking lot for future ideas |
-| [AGENTS.md](AGENTS.md) | Rules the in-app agent and coding agents follow |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)     | Cloudflare and Supabase runbook, risks, smoke tests       |
+| [docs/ROADMAP.md](docs/ROADMAP.md)           | Phases, cut lines, the hackathon deadline                 |
+| [docs/DECISIONS.md](docs/DECISIONS.md)       | Why the architecture is the way it is                     |
+| [docs/DEMO.md](docs/DEMO.md)                 | The three-meeting demo and submission requirements        |
+| [docs/IDEAS.md](docs/IDEAS.md)               | Parking lot for future ideas                              |
+| [AGENTS.md](AGENTS.md)                       | Rules the in-app agent and coding agents follow           |
 
 ## Contents
 
@@ -52,13 +52,13 @@ For any commitment, Pactlane should answer:
 
 ### How it differs from AI meeting assistants
 
-| Traditional meeting assistant | Pactlane |
-| --- | --- |
-| Summarizes one meeting | Tracks one commitment across many meetings |
-| Produces a list of action items | Maintains commitments with stable identities |
-| Asks you to trust the summary | Links each claim to a transcript quote the server checks |
-| Each meeting starts from zero | A new meeting updates existing commitments |
-| AI output is the end result | The agent proposes, and people approve, edit, reject or reverse |
+| Traditional meeting assistant   | Pactlane                                                        |
+| ------------------------------- | --------------------------------------------------------------- |
+| Summarizes one meeting          | Tracks one commitment across many meetings                      |
+| Produces a list of action items | Maintains commitments with stable identities                    |
+| Asks you to trust the summary   | Links each claim to a transcript quote the server checks        |
+| Each meeting starts from zero   | A new meeting updates existing commitments                      |
+| AI output is the end result     | The agent proposes, and people approve, edit, reject or reverse |
 
 ### Long-term mission
 
@@ -81,13 +81,14 @@ Pactlane should identify the original commitment, link it to its original eviden
 1. Open Pactlane and select or create a project.
 2. Create a meeting and paste notes or a transcript, or upload a supported text file.
 3. The agent analyzes the transcript.
-4. Pactlane extracts a summary, decisions, commitments, owners, deadlines, priorities, source evidence and uncertainties that need review.
-5. Commitments appear in an editable workspace, each able to open its source evidence.
-6. The user corrects owners, deadlines, descriptions and statuses. Changes persist with an audit trail.
-7. Later meetings update the same commitments instead of duplicating them.
-8. Pactlane identifies unfinished work, delays and repeated carry-over.
-9. The agent proposes solutions, and users approve, edit, reject or reverse them.
-10. Pactlane prepares follow-up drafts and the next meeting agenda.
+4. Pactlane saves a draft summary, decisions, commitments, owners, deadlines, priorities, source evidence and uncertainties that need review.
+5. An authorized project editor reviews and explicitly publishes the meeting analysis before project viewers can see it. Publishing never confirms each commitment or changes source verification.
+6. Commitments appear in an editable workspace, each able to open its source evidence.
+7. The user corrects owners, deadlines, descriptions and statuses. Changes persist with an audit trail.
+8. Later meetings update the same commitments instead of duplicating them.
+9. Pactlane identifies unfinished work, delays and repeated carry-over.
+10. The agent proposes solutions, and users approve, edit, reject or reverse them.
+11. Pactlane prepares follow-up drafts and the next meeting agenda.
 
 ### Human-agent collaboration
 
@@ -112,12 +113,12 @@ Premium, minimal, calm, intelligent, modern, clear, purposeful and trustworthy. 
 
 All of these are **planned**. Nothing in this section is implemented yet.
 
-| Tier | Feature |
-| --- | --- |
-| **Essential MVP** | Projects and meetings; transcript paste; agent extraction; commitments with owner, due date, priority and status; source evidence with server verification; editable workspace; audit trail |
-| **Hackathon differentiators** | Commitment Trail across meetings; duplicate-free matching to existing commitments; slippage and carry-over detection; agent proposals with approve, edit, reject; visible history and undo |
-| **Post-MVP** | Follow-up delivery; next-meeting agenda; team collaboration; calendar and chat integrations; analytics |
-| **Experimental** | See [docs/IDEAS.md](docs/IDEAS.md) |
+| Tier                          | Feature                                                                                                                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Essential MVP**             | Projects and meetings; transcript paste; agent extraction; commitments with owner, due date, priority and status; source evidence with server verification; editable workspace; audit trail |
+| **Hackathon differentiators** | Commitment Trail across meetings; duplicate-free matching to existing commitments; slippage and carry-over detection; agent proposals with approve, edit, reject; visible history and undo  |
+| **Post-MVP**                  | Follow-up delivery; next-meeting agenda; team collaboration; calendar and chat integrations; analytics                                                                                      |
+| **Experimental**              | See [docs/IDEAS.md](docs/IDEAS.md)                                                                                                                                                          |
 
 ---
 
@@ -125,19 +126,19 @@ All of these are **planned**. Nothing in this section is implemented yet.
 
 ### Stack
 
-| Concern | Choice | State |
-| --- | --- | --- |
-| Framework | Agent-Native 0.226.0, standalone Chat template | Installed and running |
-| UI and routing | React 19, React Router 8, Vite, Tailwind, shadcn/ui | From template |
-| Server | Nitro | From template |
-| Language | TypeScript, strict | Typecheck passes |
-| Database | PostgreSQL through Drizzle ORM | Schema implemented |
-| Local database | PGlite at `data/pglite` | Migrated and validated |
-| Production database | Supabase PostgreSQL | **Not provisioned** |
-| Authentication | Framework Better Auth integration | From template, unchanged |
-| Validation | Zod at actions, database constraints | Constraints implemented |
-| Hosting | Cloudflare Workers, Vercel as fallback | Build and dry run only, **not deployed** |
-| AI | Framework agent runtime, replaceable provider | **No provider configured or tested** |
+| Concern             | Choice                                              | State                                    |
+| ------------------- | --------------------------------------------------- | ---------------------------------------- |
+| Framework           | Agent-Native 0.226.0, standalone Chat template      | Installed and running                    |
+| UI and routing      | React 19, React Router 8, Vite, Tailwind, shadcn/ui | From template                            |
+| Server              | Nitro                                               | From template                            |
+| Language            | TypeScript, strict                                  | Typecheck passes                         |
+| Database            | PostgreSQL through Drizzle ORM                      | Schema implemented                       |
+| Local database      | PGlite at `data/pglite`                             | Migrated and validated                   |
+| Production database | Supabase PostgreSQL                                 | **Not provisioned**                      |
+| Authentication      | Framework Better Auth integration                   | From template, unchanged                 |
+| Validation          | Zod at actions, database constraints                | Constraints implemented                  |
+| Hosting             | Cloudflare Workers, Vercel as fallback              | Build and dry run only, **not deployed** |
+| AI                  | Framework agent runtime, replaceable provider       | **No provider configured or tested**     |
 
 ### High-level architecture
 
@@ -165,7 +166,7 @@ flowchart LR
 - **Agent to actions.** Each file in `actions/` is discovered automatically and exposed to the agent as a tool described by its Zod schema. The agent and UI share one business operation.
 - **Storage.** Domain data lives in PostgreSQL, using PGlite locally and Supabase in production. The framework's own tables share the same database.
 - **Synchronization.** After each side-effecting tool call, the chat run invalidates affected action queries, so agent edits appear without custom sync code. Long-lived hosts use server-sent events; production serverless uses `/_agent-native/poll`.
-- **Source verification (planned).** The server loads the stored transcript and checks each proposed quote against it. Details are in [ARCHITECTURE.md](docs/ARCHITECTURE.md#source-verification).
+- **Source verification.** The server loads the stored transcript and checks each proposed quote against it; only the server sets a verification status. Details are in [ARCHITECTURE.md](docs/ARCHITECTURE.md#source-verification).
 - **Authentication and authorization.** Better Auth owns sign-in. Actions receive the trusted identity as `ctx.userEmail` and `ctx.orgId`. Projects are registered as shareable resources, private by default and never link-public. Every project action checks access itself, and a missing project and a forbidden one give the same answer.
 
 ---
@@ -195,15 +196,15 @@ AGENTS.md             Agent rules, loaded every turn
 
 Pactlane is a modular monolith. These are logical boundaries, not packages or services, and only their tables exist today.
 
-| Module | Owns |
-| --- | --- |
-| projects | Grouping, ownership and sharing |
-| people | Participants and aliases, with or without accounts |
-| meetings | Transcripts, summaries and processing state |
-| commitments | Stable commitment records and their status |
-| evidence | Transcript quotes and verification state |
-| ledger | The `changes` history and future undo |
-| followups | Drafts and their approval |
+| Module      | Owns                                               |
+| ----------- | -------------------------------------------------- |
+| projects    | Grouping, ownership and sharing                    |
+| people      | Participants and aliases, with or without accounts |
+| meetings    | Transcripts, summaries and processing state        |
+| commitments | Stable commitment records and their status         |
+| evidence    | Transcript quotes and verification state           |
+| ledger      | The `changes` history and future undo              |
+| followups   | Drafts and their approval                          |
 
 ### Database overview
 
@@ -264,16 +265,16 @@ Nothing to run. With `DATABASE_URL` unset, the framework uses PGlite at `data/pg
 
 ### Commands
 
-| Command | Purpose |
-| --- | --- |
-| `pnpm dev` | Development server |
-| `pnpm build` | Production build for Node |
-| `pnpm start` | Run the production build |
-| `pnpm typecheck` | Type-check |
-| `pnpm test` | Run tests |
-| `pnpm agent-native:doctor` | Framework guards |
-| `pnpm action <name>` | Run an action from the command line |
-| `pnpm migrate:production` | Apply migrations to the configured database |
+| Command                    | Purpose                                     |
+| -------------------------- | ------------------------------------------- |
+| `pnpm dev`                 | Development server                          |
+| `pnpm build`               | Production build for Node                   |
+| `pnpm start`               | Run the production build                    |
+| `pnpm typecheck`           | Type-check                                  |
+| `pnpm test`                | Run tests                                   |
+| `pnpm agent-native:doctor` | Framework guards                            |
+| `pnpm action <name>`       | Run an action from the command line         |
+| `pnpm migrate:production`  | Apply migrations to the configured database |
 
 The template has no lint script. Formatting uses `oxfmt`.
 
@@ -285,13 +286,13 @@ The Agent-Native CLI collects anonymous usage data. Opt out with `npx @agent-nat
 
 **Nothing has been deployed.** The complete runbook is [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). In short:
 
-| Topic | Approach |
-| --- | --- |
-| Hosting | Worker built with `NITRO_PRESET=cloudflare_module`, config generated at `.output/server/wrangler.json` |
-| Runtime database | Supabase transaction pooler, port 6543, as `DATABASE_URL` |
-| Migrations | Release step `pnpm migrate:production` over a direct or session connection, never in request handling |
-| Secrets | `wrangler secret put`, never committed |
-| Fallback | `NITRO_PRESET=vercel` with `vercel deploy --prebuilt --prod` |
+| Topic            | Approach                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| Hosting          | Worker built with `NITRO_PRESET=cloudflare_module`, config generated at `.output/server/wrangler.json` |
+| Runtime database | Supabase transaction pooler, port 6543, as `DATABASE_URL`                                              |
+| Migrations       | Release step `pnpm migrate:production` over a direct or session connection, never in request handling  |
+| Secrets          | `wrangler secret put`, never committed                                                                 |
+| Fallback         | `NITRO_PRESET=vercel` with `vercel deploy --prebuilt --prod`                                           |
 
 Workers Paid is effectively required: the free plan's 10 ms CPU limit cannot run agent work.
 
@@ -303,23 +304,23 @@ Workers Paid is effectively required: the free plan's 10 ms CPU limit cannot run
 
 Evidence recorded 2026-11-09.
 
-| Item | State |
-| --- | --- |
-| Chat template scaffold, dependencies, lockfile | **Validated** |
-| Documentation | **Implemented** |
-| Schema and migrations v1 to v5 | **Validated** on PGlite; v5 is additive and older analyzed meetings remain readable |
-| Tests | **Validated**, 257 passing: schema, actions, access control, hash compatibility for older analyses, the real agent loop with a scripted model, health, matching and interface logic |
-| Typecheck, framework doctor | **Validated** |
-| Node and Cloudflare builds | **Validated**, not deployed. Wrangler dry run last run in Phase 0 |
-| Project access checks in actions | **Implemented** and tested, including denial for other users and viewers |
-| Meeting storage, summary-first analysis, server evidence verification | **Implemented** and tested with controlled input, including questions, blockers and reviewable next-meeting suggestions |
-| Commitment editing, review, participants, history, meeting workspace | **Implemented**. Browser-tested on a database copy, with a second user denied |
-| Project ledger, candidate search, human-confirmed links, derived health, Commitment Trail | **Implemented**. Browser-tested across three meetings on a database copy. Matching is deterministic |
-| Agent rules | **Implemented**. A real model's behavior is untested because none is configured |
-| AI agent execution | **Blocked** on a provider credential. No real extraction has been run |
-| Supabase connection and migration | **Blocked** on a Supabase project |
-| Worker runtime behavior | **Blocked** on Cloudflare account and database |
-| Agent proposals, undo, follow-ups | **Planned** |
+| Item                                                                                      | State                                                                                                                                                                               |
+| ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Chat template scaffold, dependencies, lockfile                                            | **Validated**                                                                                                                                                                       |
+| Documentation                                                                             | **Implemented**                                                                                                                                                                     |
+| Schema and migrations v1 to v5                                                            | **Validated** on PGlite; v5 is additive and older analyzed meetings remain readable                                                                                                 |
+| Tests                                                                                     | **Validated**, 257 passing: schema, actions, access control, hash compatibility for older analyses, the real agent loop with a scripted model, health, matching and interface logic |
+| Typecheck, framework doctor                                                               | **Validated**                                                                                                                                                                       |
+| Node and Cloudflare builds                                                                | **Validated**, not deployed. Wrangler dry run last run in Phase 0                                                                                                                   |
+| Project access checks in actions                                                          | **Implemented** and tested, including denial for other users and viewers                                                                                                            |
+| Meeting storage, summary-first analysis, server evidence verification                     | **Implemented** and tested with controlled input, including questions, blockers and reviewable next-meeting suggestions                                                             |
+| Commitment editing, review, participants, history, meeting workspace                      | **Implemented**. Browser-tested on a database copy, with a second user denied                                                                                                       |
+| Project ledger, candidate search, human-confirmed links, derived health, Commitment Trail | **Implemented**. Browser-tested across three meetings on a database copy. Matching is deterministic                                                                                 |
+| Agent rules                                                                               | **Implemented**. A real model's behavior is untested because none is configured                                                                                                     |
+| AI agent execution                                                                        | **Blocked** on a provider credential. No real extraction has been run                                                                                                               |
+| Supabase connection and migration                                                         | **Blocked** on a Supabase project                                                                                                                                                   |
+| Worker runtime behavior                                                                   | **Blocked** on Cloudflare account and database                                                                                                                                      |
+| Agent proposals, undo, follow-ups                                                         | **Planned**                                                                                                                                                                         |
 
 ### Roadmap
 

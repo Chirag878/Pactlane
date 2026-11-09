@@ -49,21 +49,22 @@ These apply to every turn. Meeting analysis works through the actions below. A p
 
 ## Meeting analysis
 
-| Action | Use it to | Key arguments |
-| --- | --- | --- |
-| `list-projects` | Find the user's projects | none |
-| `create-project` | Start a project | `name`, `description` |
-| `list-meetings` | See a project's meetings | `projectId` |
-| `create-meeting` | Store a transcript exactly as given | `projectId`, `title`, `meetingDate`, `transcript` |
-| `get-meeting` | Read a transcript and its saved results | `id` |
-| `save-analysis` | Save a meeting's analysis | `meetingId`, `summary`, `decisions`, `commitments`, `openQuestions`, `blockers`, `nextMeeting` |
-| `list-people` | See a project's participants | `projectId` |
-| `add-person` | Add a participant the user named | `projectId`, `displayName`, `aliases`, `email` |
-| `update-commitment` | Correct a commitment | `id`, `expectedVersion`, and only the changed fields |
-| `get-commitment-history` | See who changed a commitment and when | `id` |
-| `get-commitment-ledger` | See every commitment in a project with derived health | `projectId`, `asOf` |
-| `get-commitment-trail` | Read one commitment's timeline across meetings | `id`, `asOf` |
-| `find-commitment-candidates` | Find statements that may refer to earlier commitments | `meetingId` |
+| Action                       | Use it to                                             | Key arguments                                                                                  |
+| ---------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `list-projects`              | Find the user's projects                              | none                                                                                           |
+| `create-project`             | Start a project                                       | `name`, `description`                                                                          |
+| `list-meetings`              | See a project's meetings                              | `projectId`                                                                                    |
+| `create-meeting`             | Store a transcript exactly as given                   | `projectId`, `title`, `meetingDate`, `transcript`                                              |
+| `get-meeting`                | Read a transcript and its saved results               | `id`                                                                                           |
+| `save-analysis`              | Save a meeting's analysis as a private draft          | `meetingId`, `summary`, `decisions`, `commitments`, `openQuestions`, `blockers`, `nextMeeting` |
+| `publish-meeting-analysis`   | Human UI-only publication of a reviewed draft         | `meetingId`, `expectedContentRevision` — never callable by the agent                           |
+| `list-people`                | See a project's participants                          | `projectId`                                                                                    |
+| `add-person`                 | Add a participant the user named                      | `projectId`, `displayName`, `aliases`, `email`                                                 |
+| `update-commitment`          | Correct a commitment                                  | `id`, `expectedVersion`, and only the changed fields                                           |
+| `get-commitment-history`     | See who changed a commitment and when                 | `id`                                                                                           |
+| `get-commitment-ledger`      | See every commitment in a project with derived health | `projectId`, `asOf`                                                                            |
+| `get-commitment-trail`       | Read one commitment's timeline across meetings        | `id`, `asOf`                                                                                   |
+| `find-commitment-candidates` | Find statements that may refer to earlier commitments | `meetingId`                                                                                    |
 
 When asked to analyze a meeting:
 
@@ -75,7 +76,7 @@ When asked to analyze a meeting:
 6. Set `priority` only when stated. Put any remaining doubt in `reviewNote`.
 7. Add `nextMeeting` only when the transcript discusses a follow-up meeting. Copy date and time wording exactly. Use an explicit calendar date only when it was stated; leave unresolved dates or times null and list them in `unknowns`. Include only participants named in supporting evidence. This remains a suggestion for a person to review and never creates a calendar event.
 8. Call `save-analysis` once. Retrying the same analysis is safe, and a different one for an already-saved meeting is refused with `analysis_already_saved`.
-9. Report from the action's result: what was saved, what needs review and which quotations were not verified. Only the server sets verification status.
+9. Report from the action's result: what was saved as a private draft, what needs review and which quotations were not verified. Only the server sets verification status. You cannot publish the draft or impersonate the human editor who must do so in the meeting UI.
 
 `save-analysis` saves each meeting on its own. It does not match commitments across meetings, so never say that a saved commitment was carried over or linked to an earlier one. Only a person's confirmed link does that.
 

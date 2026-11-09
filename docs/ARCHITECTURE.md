@@ -8,27 +8,27 @@ Framework details were checked against Agent-Native 0.226.0: its documentation, 
 
 One deployable application, organized by domain. There are no separate services, brokers, caches or vector stores. Modules are logical boundaries inside one codebase:
 
-| Module | Tables | State |
-| --- | --- | --- |
-| projects | `projects`, `project_shares` | Tables implemented |
-| people | `people` | Table implemented |
-| meetings | `meetings`, `meeting_findings`, `next_meeting_suggestions` | Tables implemented |
-| commitments | `commitments` | Table implemented |
-| decisions | `decisions` | Table implemented |
-| evidence | `commitment_evidence`, `decision_evidence`, `meeting_finding_evidence`, `next_meeting_evidence` | Tables implemented |
-| ledger | `changes` | Table implemented |
-| followups | `followups` | Table implemented |
+| Module      | Tables                                                                                          | State              |
+| ----------- | ----------------------------------------------------------------------------------------------- | ------------------ |
+| projects    | `projects`, `project_shares`                                                                    | Tables implemented |
+| people      | `people`                                                                                        | Table implemented  |
+| meetings    | `meetings`, `meeting_findings`, `next_meeting_suggestions`                                      | Tables implemented |
+| commitments | `commitments`                                                                                   | Table implemented  |
+| decisions   | `decisions`                                                                                     | Table implemented  |
+| evidence    | `commitment_evidence`, `decision_evidence`, `meeting_finding_evidence`, `next_meeting_evidence` | Tables implemented |
+| ledger      | `changes`                                                                                       | Table implemented  |
+| followups   | `followups`                                                                                     | Table implemented  |
 
 Where code belongs:
 
-| Concern | Location |
-| --- | --- |
-| Routes and components | `app/` |
-| Agent-exposed and UI operations | `actions/` |
-| Reusable business rules, once two actions need them | `server/lib/` |
-| Database access | `server/db/` through `getDb()` |
-| Shared status values | `shared/domain.ts` |
-| Input validation | Zod schema on each action |
+| Concern                                             | Location                       |
+| --------------------------------------------------- | ------------------------------ |
+| Routes and components                               | `app/`                         |
+| Agent-exposed and UI operations                     | `actions/`                     |
+| Reusable business rules, once two actions need them | `server/lib/`                  |
+| Database access                                     | `server/db/` through `getDb()` |
+| Shared status values                                | `shared/domain.ts`             |
+| Input validation                                    | Zod schema on each action      |
 
 ## High-level system
 
@@ -93,6 +93,7 @@ erDiagram
 - `commitment_evidence.linked_by` and `linked_at` mark a quote a person confirmed as a later mention. `commitment_link_dismissals` records suggestions a person ruled out.
 - `commitments.version`, `review_state`, `reviewed_by`, `reviewed_at` and `review_flags` carry human control. See [Human control](#human-control).
 - `meetings.analysis_hash` is set once by `save-analysis`. An identical retry returns the saved result, and a different analysis for that meeting is refused.
+- `meetings.analysis_publication_state` is `draft` for newly saved AI analysis and becomes `published` only through `publish-meeting-analysis`. `analysis_content_revision` changes whenever reviewable content changes, and publication atomically binds the reviewer to that exact revision in `analysis_published_revision`. The action records `analysis_published_by` and `analysis_published_at`; pre-v6 analyses remain visible as legacy published records with no invented reviewer attribution.
 
 ## Database architecture
 
@@ -107,18 +108,18 @@ Schema design choices:
 
 ### Invariants
 
-| # | Invariant | Enforced by |
-| --- | --- | --- |
-| 1 | Commitments have stable identifiers | Primary key. Reuse by matching is a Phase 3 action rule. |
-| 2 | Every commitment belongs to a project | `NOT NULL` foreign key |
-| 3 | Every meeting belongs to a project | `NOT NULL` foreign key |
-| 4 | One commitment can be supported by many meetings | `commitment_evidence` is one-to-many |
-| 5 | Owner and due date can be unknown | Nullable columns, tested |
-| 6 | Evidence has an explicit verification state | `NOT NULL`, default `unverified`, CHECK. `verified` also requires offsets. |
-| 7 | Changes are attributable and auditable | `NOT NULL` actor fields, shape CHECK. **Append-only and trusted actor are planned action rules.** |
-| 8 | Completed commitments are not reopened by unrelated text | Partly: `completed_at` must match status. **The reopen rule is planned**, since a database cannot judge relevance. |
-| 9 | Deleting a parent never destroys history | `ON DELETE RESTRICT`, tested |
-| 10 | Integrity is enforced in the database where practical | Foreign keys, CHECKs, unique indexes, 39 tests |
+| #   | Invariant                                                | Enforced by                                                                                                        |
+| --- | -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1   | Commitments have stable identifiers                      | Primary key. Reuse by matching is a Phase 3 action rule.                                                           |
+| 2   | Every commitment belongs to a project                    | `NOT NULL` foreign key                                                                                             |
+| 3   | Every meeting belongs to a project                       | `NOT NULL` foreign key                                                                                             |
+| 4   | One commitment can be supported by many meetings         | `commitment_evidence` is one-to-many                                                                               |
+| 5   | Owner and due date can be unknown                        | Nullable columns, tested                                                                                           |
+| 6   | Evidence has an explicit verification state              | `NOT NULL`, default `unverified`, CHECK. `verified` also requires offsets.                                         |
+| 7   | Changes are attributable and auditable                   | `NOT NULL` actor fields, shape CHECK. **Append-only and trusted actor are planned action rules.**                  |
+| 8   | Completed commitments are not reopened by unrelated text | Partly: `completed_at` must match status. **The reopen rule is planned**, since a database cannot judge relevance. |
+| 9   | Deleting a parent never destroys history                 | `ON DELETE RESTRICT`, tested                                                                                       |
+| 10  | Integrity is enforced in the database where practical    | Foreign keys, CHECKs, unique indexes, 39 tests                                                                     |
 
 Rules that only actions can enforce, to be built with their first action:
 
@@ -128,14 +129,14 @@ Rules that only actions can enforce, to be built with their first action:
 
 ### Access control
 
-| Layer | State |
-| --- | --- |
-| Sign-in through Better Auth | Implemented by template |
-| Ownership columns on `projects` (`owner_email`, `org_id`, `visibility`) | Implemented |
-| `project` registered as a shareable resource, `allowPublic: false`, database CHECK rejecting `public` | Implemented |
-| Identity-column policy for `people.email` | Implemented |
-| `accessFilter` on project lists and `assertAccess` on every project-scoped action (`server/lib/action-context.ts`) | Implemented |
-| Team roles beyond framework sharing | Deferred |
+| Layer                                                                                                              | State                   |
+| ------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| Sign-in through Better Auth                                                                                        | Implemented by template |
+| Ownership columns on `projects` (`owner_email`, `org_id`, `visibility`)                                            | Implemented             |
+| `project` registered as a shareable resource, `allowPublic: false`, database CHECK rejecting `public`              | Implemented             |
+| Identity-column policy for `people.email`                                                                          | Implemented             |
+| `accessFilter` on project lists and `assertAccess` on every project-scoped action (`server/lib/action-context.ts`) | Implemented             |
+| Team roles beyond framework sharing                                                                                | Deferred                |
 
 Every project-scoped action must check access to its project: child tables have no ownership columns of their own and inherit access through `project_id`.
 
@@ -147,32 +148,33 @@ Files use the framework's `verb-noun` naming, and the filename is the action nam
 
 Implemented:
 
-| Action | Responsibility | Reads or writes | Required access |
-| --- | --- | --- | --- |
-| `create-project` | Create a project owned by the current user | Write | Signed in |
-| `list-projects` | Projects the user can access | Read | Signed in, filtered |
-| `create-meeting` | Store a meeting and its original transcript | Write | Editor |
-| `list-meetings` | A project's meetings, without transcripts | Read | Viewer |
-| `get-meeting` | Meeting, transcript and extracted results | Read | Viewer |
-| `save-analysis` | Validate and persist summary, action items, decisions, questions, blockers and an optional next-meeting suggestion as one operation; verify evidence and flag uncertainty | Write | Editor |
-| `update-commitment` | One validated patch for description, owner, due date, priority, status, guarded by a version check | Write | Editor |
-| `review-commitment` | A person confirms, rejects or restores a commitment. Hidden from the agent and refused to every non-UI caller | Write | Editor, signed-in app UI only |
-| `list-people` | A project's participants | Read | Viewer |
-| `add-person` | Add a participant, refusing a name or alias that already matches | Write | Editor |
-| `get-commitment-history` | A commitment's `changes`, newest first, as field-level before and after | Read | Viewer |
-| `get-commitment-ledger` | Every commitment in a project, with related meetings and derived health | Read | Viewer |
-| `get-commitment-trail` | One commitment's timeline across meetings | Read | Viewer |
-| `find-commitment-candidates` | Suggest which statements in a meeting may refer to earlier commitments | Read | Viewer |
-| `link-commitment-evidence` | A person confirms a later mention, attaching server-checked evidence | Write | Editor, signed-in app UI only |
-| `dismiss-commitment-link` | A person rules out a suggested link | Write | Editor, signed-in app UI only |
+| Action                       | Responsibility                                                                                                                                                            | Reads or writes | Required access               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- | ----------------------------- |
+| `create-project`             | Create a project owned by the current user                                                                                                                                | Write           | Signed in                     |
+| `list-projects`              | Projects the user can access                                                                                                                                              | Read            | Signed in, filtered           |
+| `create-meeting`             | Store a meeting and its original transcript                                                                                                                               | Write           | Editor                        |
+| `list-meetings`              | A project's meetings, without transcripts                                                                                                                                 | Read            | Viewer                        |
+| `get-meeting`                | Meeting, transcript and extracted results                                                                                                                                 | Read            | Viewer                        |
+| `save-analysis`              | Validate and persist summary, action items, decisions, questions, blockers and an optional next-meeting suggestion as one operation; verify evidence and flag uncertainty | Write           | Editor                        |
+| `publish-meeting-analysis`   | Human UI-only publication of a reviewed analysis; records reviewer identity and time without confirming commitments or evidence                                           | Write           | Editor, signed-in app UI only |
+| `update-commitment`          | One validated patch for description, owner, due date, priority, status, guarded by a version check                                                                        | Write           | Editor                        |
+| `review-commitment`          | A person confirms, rejects or restores a commitment. Hidden from the agent and refused to every non-UI caller                                                             | Write           | Editor, signed-in app UI only |
+| `list-people`                | A project's participants                                                                                                                                                  | Read            | Viewer                        |
+| `add-person`                 | Add a participant, refusing a name or alias that already matches                                                                                                          | Write           | Editor                        |
+| `get-commitment-history`     | A commitment's `changes`, newest first, as field-level before and after                                                                                                   | Read            | Viewer                        |
+| `get-commitment-ledger`      | Every commitment in a project, with related meetings and derived health                                                                                                   | Read            | Viewer                        |
+| `get-commitment-trail`       | One commitment's timeline across meetings                                                                                                                                 | Read            | Viewer                        |
+| `find-commitment-candidates` | Suggest which statements in a meeting may refer to earlier commitments                                                                                                    | Read            | Viewer                        |
+| `link-commitment-evidence`   | A person confirms a later mention, attaching server-checked evidence                                                                                                      | Write           | Editor, signed-in app UI only |
+| `dismiss-commitment-link`    | A person rules out a suggested link                                                                                                                                       | Write           | Editor, signed-in app UI only |
 
 Proposed:
 
-| Action | Responsibility | Reads or writes |
-| --- | --- | --- |
-| `save-followup` | Create or edit a draft | Write |
-| `approve-followup` | Approve a draft, with `needsApproval` for agent callers | Write |
-| `undo-change` | Apply a controlled reversal of a recorded change | Write |
+| Action             | Responsibility                                          | Reads or writes |
+| ------------------ | ------------------------------------------------------- | --------------- |
+| `save-followup`    | Create or edit a draft                                  | Write           |
+| `approve-followup` | Approve a draft, with `needsApproval` for agent callers | Write           |
+| `undo-change`      | Apply a controlled reversal of a recorded change        | Write           |
 
 Shape of every write action: validate with Zod, check project access, apply business rules, write the record and its `changes` row together, then return the saved result. Direct CRUD actions contain no hidden LLM calls.
 
@@ -214,12 +216,12 @@ Implemented as a deterministic server function in `server/lib/evidence.ts`, with
 
 Input: a meeting id and proposed evidence, each a quote with optional offsets. It loads the transcript from the database and never accepts one from the caller.
 
-| Situation | Result |
-| --- | --- |
-| Offsets given and the substring equals the quote exactly | `verified` |
-| No offsets, and the quote occurs exactly once | `verified`, with offsets stored |
-| Quote occurs more than once and offsets do not resolve it | `ambiguous` |
-| Quote is not in the transcript, or offsets point to different text | `missing` |
+| Situation                                                          | Result                          |
+| ------------------------------------------------------------------ | ------------------------------- |
+| Offsets given and the substring equals the quote exactly           | `verified`                      |
+| No offsets, and the quote occurs exactly once                      | `verified`, with offsets stored |
+| Quote occurs more than once and offsets do not resolve it          | `ambiguous`                     |
+| Quote is not in the transcript, or offsets point to different text | `missing`                       |
 
 Rules:
 
@@ -236,21 +238,29 @@ Implemented in migration v3 (`pactlane-human-control`) and `server/lib/commitmen
 
 **Editing.** `update-commitment` takes a partial patch and the `expectedVersion` the caller last read. Every change to a commitment bumps `commitments.version`. The update runs as one compare-and-set statement together with its `changes` row in a transaction, so a stale editor gets `version_conflict` with the current commitment instead of overwriting newer work. A patch that changes nothing returns `changed: false`, writes no history and does not bump the version. A rejected commitment cannot be edited until restored.
 
-| Rule | Behavior |
-| --- | --- |
-| Owner | Must be a person of the same project, else `owner_not_in_project`. `null` unassigns. `stated_owner_name` and `stated_due_text` are never edited, so the transcript's words stay as history. |
-| Due date | A real calendar date or `null`. |
+| Rule         | Behavior                                                                                                                                                                                                                                                  |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owner        | Must be a person of the same project, else `owner_not_in_project`. `null` unassigns. `stated_owner_name` and `stated_due_text` are never edited, so the transcript's words stay as history.                                                               |
+| Due date     | A real calendar date or `null`.                                                                                                                                                                                                                           |
 | Status moves | `open`, `in_progress` and `blocked` move freely among themselves and to `completed` or `cancelled`. `completed` reopens only to `open` or `in_progress`, and only by a person. `cancelled` returns only to `open`. Anything else is `invalid_transition`. |
-| Evidence | Never read or written by these actions. |
+| Evidence     | Never read or written by these actions.                                                                                                                                                                                                                   |
 
 **Review.** Two separate questions are stored separately:
 
-| Question | Where | Who sets it |
-| --- | --- | --- |
-| Did the transcript contain the words? | `commitment_evidence.verification_status` | Server only, at `save-analysis` |
-| Did a person accept this commitment? | `commitments.review_state` (`proposed`, `confirmed`, `rejected`), with `reviewed_by` and `reviewed_at` | A signed-in person, through `review-commitment` |
+| Question                              | Where                                                                                                  | Who sets it                                     |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------- |
+| Did the transcript contain the words? | `commitment_evidence.verification_status`                                                              | Server only, at `save-analysis`                 |
+| Did a person accept this commitment?  | `commitments.review_state` (`proposed`, `confirmed`, `rejected`), with `reviewed_by` and `reviewed_at` | A signed-in person, through `review-commitment` |
 
 Confirming never changes evidence, so a `missing` quotation is still shown as not found after a person accepts the commitment. `review-commitment` is both `uiOnly` and `agentTool: false`: the framework requires a signed-in frontend caller, while the action still enforces editor access to the commitment's project.
+
+### Meeting publication
+
+Analysis publication is a separate, meeting-level lifecycle: `save-analysis` creates a private `draft`; `publish-meeting-analysis` is `uiOnly` and `agentTool: false`, and requires project-editor access. The UI sends the `analysis_content_revision` the editor reviewed. A compare-and-set publishes only that revision, records it with the trusted signed-in editor and time, and appends a meeting history event. A stale request receives `analysis_revision_conflict` and must review the latest draft. Server-verified evidence is not human approval, and publication does not confirm, reject, or otherwise alter any commitment.
+
+Project viewers can open the original meeting and transcript, but draft summaries, findings, suggestions, commitments, their evidence, ledger entries, candidate matching, and commitment history/trails are server-redacted or denied until publication. Editors retain access to review drafts. Viewer-facing multi-query reads use a read-only repeatable-read transaction, so publication state and returned analysis share one database snapshot. A material commitment edit or review increments the originating meeting's content revision and retracts it to `draft`, requiring explicit re-publication; evidence and audit history remain intact. Linking evidence likewise increments and retracts the meeting whose reviewable analysis changed. There are no notifications or calendar side effects.
+
+Migration v6 introduced publication state and was already applied locally before revision hardening, so migration v7 upgrades it forward without rewriting history. V7 keeps meetings with a pre-existing `analysis_hash` visible as legacy published revision 1 without inventing a reviewer, moves unanalyzed meetings to draft revision 0, and changes the database default to draft. After v7, an older application instance can still save analysis, but the database default keeps that content private; its revision-unaware publish attempt is rejected by the attribution constraint. Apply v7 before the new application code, do not run old and new migration owners concurrently, and restart long-running instances so they use the revision-aware contract.
 
 Why a commitment needs a person is stored as `review_flags`, a list of `{code, message}` with codes `evidence`, `owner`, `deadline`, `note` and `legacy`. `needs_review` is true while flags remain and the commitment is not rejected, and `review_reason` is their joined text for older readers. Rules:
 
@@ -281,12 +291,12 @@ Implemented in migration v4 (`pactlane-commitment-trail`). There is no timeline 
 
 **Finding candidates.** `find-commitment-candidates` is deterministic and read-only (`server/lib/commitment-matching.ts`). It splits a transcript into statements, each an exact slice, and compares each against earlier commitments of the project.
 
-| Signal | Use |
-| --- | --- |
-| Distinctive words shared with the description | Required. Filler, generic verbs, dates and the owner's name do not count |
-| The owner's name or alias appears in the statement | Lowers how many shared words are required |
-| Wording such as "still" or "not delivered" | Adds a reason only. Never enough alone |
-| The origin meeting's title appears | Adds a reason only |
+| Signal                                             | Use                                                                      |
+| -------------------------------------------------- | ------------------------------------------------------------------------ |
+| Distinctive words shared with the description      | Required. Filler, generic verbs, dates and the owner's name do not count |
+| The owner's name or alias appears in the statement | Lowers how many shared words are required                                |
+| Wording such as "still" or "not delivered"         | Adds a reason only. Never enough alone                                   |
+| The origin meeting's title appears                 | Adds a reason only                                                       |
 
 Results carry plain reasons and no score. Every commitment that could match is listed, so a person chooses. A statement that repeats in a transcript gets no offsets, so linking it is saved as `ambiguous`. This misses paraphrases that share no distinctive word, so a person can also link by hand from the meeting page.
 
@@ -294,12 +304,12 @@ Results carry plain reasons and no score. Every commitment that could match is l
 
 **Health.** `server/lib/commitment-health.ts` derives everything from saved rows, with no model and nothing stored.
 
-| Signal | Rule |
-| --- | --- |
-| Overdue | Status is open, in progress or blocked, not rejected, the due date is before the reference date, and no `deadline` or `legacy` flag questions it. A date from relative words stays unconfirmed until a person settles it, and a date an agent sets is flagged |
-| Revisited | Verified evidence from two or more distinct meetings |
-| Meeting count | Distinct meetings, so several quotes from one meeting count once |
-| Needs review | The commitment's open flags |
+| Signal        | Rule                                                                                                                                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overdue       | Status is open, in progress or blocked, not rejected, the due date is before the reference date, and no `deadline` or `legacy` flag questions it. A date from relative words stays unconfirmed until a person settles it, and a date an agent sets is flagged |
+| Revisited     | Verified evidence from two or more distinct meetings                                                                                                                                                                                                          |
+| Meeting count | Distinct meetings, so several quotes from one meeting count once                                                                                                                                                                                              |
+| Needs review  | The commitment's open flags                                                                                                                                                                                                                                   |
 
 `facts` are sentences built from these values, for the UI and the agent to repeat. Nothing counts delays or claims work was unfinished on a past date. A due-date change shows only as an entry in the audit trail.
 
@@ -386,11 +396,11 @@ Full analysis in [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Environment boundaries
 
-| Environment | Database | Auth | Migrations |
-| --- | --- | --- | --- |
-| Local | PGlite, `data/pglite` | Local dev sign-in | At server startup |
-| Tests | In-memory PGlite | None | Applied by the test |
-| Production | Supabase | Better Auth with `BETTER_AUTH_SECRET` | `pnpm migrate:production` |
+| Environment | Database              | Auth                                  | Migrations                |
+| ----------- | --------------------- | ------------------------------------- | ------------------------- |
+| Local       | PGlite, `data/pglite` | Local dev sign-in                     | At server startup         |
+| Tests       | In-memory PGlite      | None                                  | Applied by the test       |
+| Production  | Supabase              | Better Auth with `BETTER_AUTH_SECRET` | `pnpm migrate:production` |
 
 Database URLs and provider keys are server-side only.
 

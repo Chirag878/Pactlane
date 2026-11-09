@@ -254,4 +254,60 @@ CREATE INDEX IF NOT EXISTS decision_evidence_decision_idx
   ON decision_evidence (project_id, decision_id, created_at);
 `,
   },
+  {
+    version: 3,
+    name: "pactlane-human-control",
+    sql: `
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS review_flags JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS review_state TEXT NOT NULL DEFAULT 'proposed';
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+ALTER TABLE commitments ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+
+ALTER TABLE commitments DROP CONSTRAINT IF EXISTS commitments_review_state_check;
+ALTER TABLE commitments ADD CONSTRAINT commitments_review_state_check
+  CHECK (review_state IN ('proposed', 'confirmed', 'rejected'));
+ALTER TABLE commitments DROP CONSTRAINT IF EXISTS commitments_review_flags_is_array;
+ALTER TABLE commitments ADD CONSTRAINT commitments_review_flags_is_array
+  CHECK (jsonb_typeof(review_flags) = 'array');
+ALTER TABLE commitments DROP CONSTRAINT IF EXISTS commitments_version_positive;
+ALTER TABLE commitments ADD CONSTRAINT commitments_version_positive CHECK (version >= 1);
+
+UPDATE commitments
+  SET review_flags = jsonb_build_array(jsonb_build_object('code', 'legacy', 'message', COALESCE(review_reason, 'Flagged for review.')))
+  WHERE needs_review AND review_flags = '[]'::jsonb;
+`,
+  },
+  {
+    version: 4,
+    name: "pactlane-commitment-trail",
+    sql: `
+ALTER TABLE commitment_evidence ADD COLUMN IF NOT EXISTS linked_by TEXT;
+ALTER TABLE commitment_evidence ADD COLUMN IF NOT EXISTS linked_at TIMESTAMPTZ;
+
+ALTER TABLE commitment_evidence DROP CONSTRAINT IF EXISTS commitment_evidence_link_complete;
+ALTER TABLE commitment_evidence ADD CONSTRAINT commitment_evidence_link_complete
+  CHECK ((linked_by IS NULL) = (linked_at IS NULL));
+
+CREATE UNIQUE INDEX IF NOT EXISTS commitment_evidence_link_unique
+  ON commitment_evidence (project_id, commitment_id, meeting_id, md5(source_quote), COALESCE(source_start, -1))
+  WHERE linked_by IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS commitment_link_dismissals (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  commitment_id TEXT NOT NULL,
+  meeting_id TEXT NOT NULL,
+  source_quote TEXT NOT NULL CONSTRAINT commitment_link_dismissals_quote_present CHECK (length(source_quote) > 0),
+  dismissed_by TEXT NOT NULL CONSTRAINT commitment_link_dismissals_actor_present CHECK (length(btrim(dismissed_by)) > 0),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT commitment_link_dismissals_commitment_fk FOREIGN KEY (project_id, commitment_id)
+    REFERENCES commitments (project_id, id) ON DELETE RESTRICT,
+  CONSTRAINT commitment_link_dismissals_meeting_fk FOREIGN KEY (project_id, meeting_id)
+    REFERENCES meetings (project_id, id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS commitment_link_dismissals_unique
+  ON commitment_link_dismissals (project_id, commitment_id, meeting_id, md5(source_quote));
+`,
+  },
 ];

@@ -12,6 +12,7 @@ import {
   FOLLOWUP_STATUSES,
   MEETING_PROCESSING_STATUSES,
   PROJECT_VISIBILITIES,
+  REVIEW_STATES,
 } from "../../shared/domain.js";
 import { migrations } from "./migrations.js";
 import * as schema from "./schema.js";
@@ -98,6 +99,7 @@ describe("foundation migration", () => {
       schema.meetings,
       schema.commitments,
       schema.commitmentEvidence,
+      schema.commitmentLinkDismissals,
       schema.decisions,
       schema.decisionEvidence,
       schema.changes,
@@ -122,6 +124,7 @@ describe("foundation migration", () => {
     ["meetings_processing_status_check", MEETING_PROCESSING_STATUSES],
     ["commitments_status_check", COMMITMENT_STATUSES],
     ["commitments_priority_check", COMMITMENT_PRIORITIES],
+    ["commitments_review_state_check", REVIEW_STATES],
     [
       "commitment_evidence_verification_status_check",
       EVIDENCE_VERIFICATION_STATUSES,

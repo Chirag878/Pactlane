@@ -23,6 +23,22 @@ export const COMMITMENT_STATUSES = [
 ] as const;
 export type CommitmentStatus = (typeof COMMITMENT_STATUSES)[number];
 
+/**
+ * Moves a person may make by hand. Reopening a completed commitment is allowed
+ * but deliberate; the server also refuses it to an agent. Cancelled work can
+ * only be reinstated as open.
+ */
+export const COMMITMENT_TRANSITIONS: Record<
+  CommitmentStatus,
+  readonly CommitmentStatus[]
+> = {
+  open: ["in_progress", "blocked", "completed", "cancelled"],
+  in_progress: ["open", "blocked", "completed", "cancelled"],
+  blocked: ["open", "in_progress", "completed", "cancelled"],
+  completed: ["open", "in_progress"],
+  cancelled: ["open"],
+};
+
 export const COMMITMENT_PRIORITIES = ["low", "medium", "high"] as const;
 
 /**
@@ -57,3 +73,25 @@ export const ANALYSIS_BASES = ["explicit", "inferred"] as const;
 
 export const MAX_EVIDENCE_QUOTE_LENGTH = 2_000;
 export const MAX_TRANSCRIPT_LENGTH = 200_000;
+
+/** Human judgement about a commitment, separate from evidence verification. */
+export const REVIEW_STATES = ["proposed", "confirmed", "rejected"] as const;
+export type ReviewState = (typeof REVIEW_STATES)[number];
+
+/** Why a commitment needs a person. `legacy` marks flags saved before codes. */
+export const REVIEW_FLAG_CODES = [
+  "evidence",
+  "owner",
+  "deadline",
+  "note",
+  "legacy",
+] as const;
+export type ReviewFlagCode = (typeof REVIEW_FLAG_CODES)[number];
+
+export interface ReviewFlag {
+  code: ReviewFlagCode;
+  message: string;
+}
+
+export const MAX_COMMITMENT_DESCRIPTION_LENGTH = 1_000;
+export const MAX_PERSON_NAME_LENGTH = 200;

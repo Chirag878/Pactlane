@@ -21,6 +21,8 @@ import {
   EVIDENCE_VERIFICATION_STATUSES,
   FOLLOWUP_STATUSES,
   MEETING_PROCESSING_STATUSES,
+  REVIEW_STATES,
+  type ReviewFlag,
 } from "../../shared/domain.js";
 
 /**
@@ -103,7 +105,21 @@ export const commitments = pgTable("commitments", {
     .notNull()
     .default("open"),
   needsReview: boolean("needs_review").notNull().default(false),
+  /** The open flags' messages joined, kept for readers of older rows. */
   reviewReason: text("review_reason"),
+  /** Unresolved reasons for review. Resolving one never clears another. */
+  reviewFlags: jsonb("review_flags")
+    .$type<ReviewFlag[]>()
+    .notNull()
+    .default([]),
+  /** A person's verdict. It never changes any evidence verification status. */
+  reviewState: text("review_state", { enum: REVIEW_STATES })
+    .notNull()
+    .default("proposed"),
+  reviewedBy: text("reviewed_by"),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  /** Bumped on every change, so a stale editor is told instead of overwriting. */
+  version: integer("version").notNull().default(1),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
@@ -123,6 +139,20 @@ export const commitmentEvidence = pgTable("commitment_evidence", {
   })
     .notNull()
     .default("unverified"),
+  /** Set only when a person confirmed this quote as a later mention. */
+  linkedBy: text("linked_by"),
+  linkedAt: timestamp("linked_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+/** Suggestions a person ruled out, so they are not offered again. */
+export const commitmentLinkDismissals = pgTable("commitment_link_dismissals", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  commitmentId: text("commitment_id").notNull(),
+  meetingId: text("meeting_id").notNull(),
+  sourceQuote: text("source_quote").notNull(),
+  dismissedBy: text("dismissed_by").notNull(),
   createdAt: createdAt(),
 });
 

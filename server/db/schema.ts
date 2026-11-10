@@ -24,6 +24,7 @@ import {
   MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
   ANALYSIS_PUBLICATION_STATES,
+  ASSIGNMENT_STATUSES,
   ORGANIZATION_INVITATION_STATUSES,
   ORGANIZATION_INVITE_ROLES,
   ORGANIZATION_MEMBERSHIP_STATUSES,
@@ -199,6 +200,27 @@ export const commitments = pgTable("commitments", {
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
+});
+
+/** A deliberate delivery of an existing commitment to one authenticated user. */
+export const commitmentAssignments = pgTable("commitment_assignments", {
+  id: id(),
+  projectId: text("project_id").notNull(),
+  organizationId: text("organization_id").notNull(),
+  commitmentId: text("commitment_id").notNull(),
+  /** Stable Better Auth user id. Email is a historical display snapshot only. */
+  recipientAccountId: text("recipient_account_id").notNull(),
+  recipientEmail: text("recipient_email").notNull(),
+  status: text("status", { enum: ASSIGNMENT_STATUSES })
+    .notNull()
+    .default("pending"),
+  assignedBy: text("assigned_by").notNull(),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: updatedAt(),
+  note: text("note"),
+  version: integer("version").notNull().default(1),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
 });
 
 /** Also the commitment-to-meeting link: no separate join table is needed. */

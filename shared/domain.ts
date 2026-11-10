@@ -32,6 +32,28 @@ export const ORGANIZATION_INVITATION_STATUSES = [
 ] as const;
 export const ORGANIZATION_INVITATION_TTL_DAYS = 7;
 
+/** Human handoff state for a confirmed, published commitment. */
+export const ASSIGNMENT_STATUSES = [
+  "pending",
+  "accepted",
+  "disputed",
+  "in_progress",
+  "completed",
+] as const;
+export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
+
+/** Only these moves are valid; acknowledgement can never be impersonated. */
+export const ASSIGNMENT_TRANSITIONS: Record<
+  AssignmentStatus,
+  readonly AssignmentStatus[]
+> = {
+  pending: ["accepted", "disputed"],
+  accepted: ["in_progress", "completed"],
+  disputed: [],
+  in_progress: ["completed"],
+  completed: [],
+};
+
 export const MEETING_FINDING_KINDS = ["open_question", "blocker"] as const;
 export type MeetingFindingKind = (typeof MEETING_FINDING_KINDS)[number];
 

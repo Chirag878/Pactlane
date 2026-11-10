@@ -620,4 +620,51 @@ CREATE INDEX IF NOT EXISTS projects_organization_idx
   ON projects (organization_id) WHERE organization_id IS NOT NULL;
 `,
   },
+  {
+    // Assignment handoff reuses commitments. The partial unique index makes
+    // concurrent delivery idempotent for every non-terminal assignment.
+    version: 9,
+    name: "pactlane-commitment-assignments",
+    sql: `
+CREATE TABLE IF NOT EXISTS commitment_assignments (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL,
+  organization_id TEXT NOT NULL,
+  commitment_id TEXT NOT NULL,
+  recipient_account_id TEXT NOT NULL,
+  recipient_email TEXT NOT NULL
+    CONSTRAINT commitment_assignments_recipient_email_normalized
+    CHECK (length(recipient_email) > 0 AND recipient_email = lower(btrim(recipient_email))),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CONSTRAINT commitment_assignments_status_check
+    CHECK (status IN ('pending', 'accepted', 'disputed', 'in_progress', 'completed')),
+  assigned_by TEXT NOT NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  note TEXT
+    CONSTRAINT commitment_assignments_note_length
+    CHECK (note IS NULL OR length(note) <= 2000),
+  version INTEGER NOT NULL DEFAULT 1
+    CONSTRAINT commitment_assignments_version_positive CHECK (version > 0),
+  completed_at TIMESTAMPTZ,
+  CONSTRAINT commitment_assignments_completion_complete CHECK (
+    (status = 'completed') = (completed_at IS NOT NULL)
+  ),
+  CONSTRAINT commitment_assignments_project_fk FOREIGN KEY (project_id)
+    REFERENCES projects (id) ON DELETE RESTRICT,
+  CONSTRAINT commitment_assignments_organization_fk FOREIGN KEY (organization_id)
+    REFERENCES pactlane_organizations (id) ON DELETE RESTRICT,
+  CONSTRAINT commitment_assignments_commitment_fk FOREIGN KEY (project_id, commitment_id)
+    REFERENCES commitments (project_id, id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS commitment_assignments_one_active
+  ON commitment_assignments (commitment_id)
+  WHERE status IN ('pending', 'accepted', 'in_progress');
+CREATE INDEX IF NOT EXISTS commitment_assignments_recipient_idx
+  ON commitment_assignments (recipient_account_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS commitment_assignments_project_idx
+  ON commitment_assignments (project_id, updated_at DESC);
+`,
+  },
 ];

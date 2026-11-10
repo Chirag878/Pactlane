@@ -7,6 +7,7 @@ import {
   CHANGE_ENTITY_TYPES,
   CHANGE_OPERATIONS,
   ANALYSIS_PUBLICATION_STATES,
+  ASSIGNMENT_STATUSES,
   COMMITMENT_PRIORITIES,
   COMMITMENT_STATUSES,
   EVIDENCE_VERIFICATION_STATUSES,
@@ -117,6 +118,7 @@ describe("foundation migration", () => {
       schema.pactlaneOrganizations,
       schema.organizationMemberships,
       schema.organizationInvitations,
+      schema.commitmentAssignments,
     ];
     for (const table of tables) {
       const name = getTableName(table);
@@ -164,6 +166,7 @@ describe("foundation migration", () => {
     ["organization_memberships_status_check", ORGANIZATION_MEMBERSHIP_STATUSES],
     ["organization_invitations_role_check", ORGANIZATION_INVITE_ROLES],
     ["organization_invitations_status_check", ORGANIZATION_INVITATION_STATUSES],
+    ["commitment_assignments_status_check", ASSIGNMENT_STATUSES],
   ])("%s allows exactly the shared values", async (constraint, values) => {
     const { rows } = await db.query<{ def: string }>(
       `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = $1`,

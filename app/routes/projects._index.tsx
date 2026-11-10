@@ -20,6 +20,10 @@ export default function ProjectsRoute() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const { data, isLoading, error } = useActionQuery("list-projects", {});
+  const assignments = useActionQuery("list-my-assignments", {});
+  const awaiting = (assignments.data?.assignments ?? []).filter(
+    (assignment) => assignment.status === "pending" || assignment.status === "accepted" || assignment.status === "in_progress",
+  );
   // Organization projects live in their organization's workspace.
   const personal = data?.projects.filter((p) => p.organizationId === null);
   const inOrganizations =
@@ -41,6 +45,20 @@ export default function ProjectsRoute() {
         <WorkspaceSwitcher current={{ kind: "personal" }} />
         <h1 className="text-xl font-semibold">Projects</h1>
       </header>
+
+      {awaiting.length > 0 ? (
+        <section aria-label="Assignments needing you" className="rounded-xl border border-primary/40 bg-primary/[0.04] p-4">
+          <p className="text-sm">
+            <Link to="/assignments" className="font-medium underline-offset-2 hover:underline">
+              {awaiting.length} assignment{awaiting.length === 1 ? "" : "s"} need{awaiting.length === 1 ? "s" : ""} you
+            </Link>{" "}
+            <span className="text-muted-foreground">
+              — {awaiting.slice(0, 2).map((assignment) => assignment.description).join("; ")}
+              {awaiting.length > 2 ? "…" : ""}
+            </span>
+          </p>
+        </section>
+      ) : null}
 
       <form onSubmit={submit} className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">

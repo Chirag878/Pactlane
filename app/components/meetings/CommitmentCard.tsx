@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import type { CommitmentResult } from "../../../server/lib/meeting-results";
+import { AssignmentHandoff } from "./AssignmentHandoff";
 import { CommitmentHistory } from "./CommitmentHistory";
 import { EvidenceList, summarizeEvidence } from "./EvidenceList";
 
@@ -544,6 +545,12 @@ export function CommitmentCard({
       >
         View trail across meetings
       </Link>
+
+      <AssignmentHandoff
+        commitmentId={commitment.id}
+        reviewState={commitment.reviewState}
+        projectId={commitment.projectId}
+      />
 
       <CommitmentHistory commitmentId={commitment.id} />
     </article>

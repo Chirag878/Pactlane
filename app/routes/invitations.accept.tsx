@@ -14,24 +14,36 @@ export function meta() {
 
 /**
  * The token travels in the URL fragment, which browsers never send to the
- * server. It is read once, then removed from the address bar and history.
+ * server. It is read once, then removed from the address bar and history. A
+ * copy is kept in this tab until the invitation is accepted, so signing in
+ * on the way does not lose it. The token is never written to server logs.
  */
+const STORED_TOKEN_KEY = "pactlane:invitation-token";
+
+function readFragmentToken(): string | null {
+  const value = new URLSearchParams(window.location.hash.slice(1)).get("token");
+  return value && value.length >= 20 ? value : null;
+}
+
 export default function AcceptInvitationRoute() {
   const navigate = useNavigate();
   const [token, setToken] = useState<string | null | undefined>(undefined);
   const accept = useActionMutation("accept-organization-invitation", {
     uiOnly: true,
-    onSuccess: (result) =>
+    onSuccess: (result) => {
+      try {
+        window.sessionStorage.removeItem(STORED_TOKEN_KEY);
+      } catch {
+        // Storage is a convenience; the invitation itself is already used.
+      }
       void navigate(`/organizations/${result.organization.id}`, {
         replace: true,
-      }),
+      });
+    },
   });
 
   useEffect(() => {
-    const value = new URLSearchParams(window.location.hash.slice(1)).get(
-      "token",
-    );
-    setToken(value && value.length >= 20 ? value : null);
+    const fromLink = readFragmentToken();
     if (window.location.hash) {
       window.history.replaceState(
         window.history.state,
@@ -39,6 +51,22 @@ export default function AcceptInvitationRoute() {
         window.location.pathname,
       );
     }
+    if (fromLink) {
+      try {
+        window.sessionStorage.setItem(STORED_TOKEN_KEY, fromLink);
+      } catch {
+        // Private browsing may refuse storage; the in-memory token still works.
+      }
+      setToken(fromLink);
+      return;
+    }
+    let stored: string | null = null;
+    try {
+      stored = window.sessionStorage.getItem(STORED_TOKEN_KEY);
+    } catch {
+      stored = null;
+    }
+    setToken(stored && stored.length >= 20 ? stored : null);
   }, []);
 
   return (
@@ -69,12 +97,18 @@ export default function AcceptInvitationRoute() {
             </p>
           ) : null}
           <div className="flex gap-2">
-            <Button
-              onClick={() => accept.mutate({ token })}
-              disabled={accept.isPending}
-            >
-              {accept.isPending ? "Accepting…" : "Accept invitation"}
-            </Button>
+            {(accept.error as { errorCode?: string } | null)?.errorCode === "not_authenticated" ? (
+              <Button asChild>
+                <Link to="/sign-in?return=/invitations/accept">Sign in to accept</Link>
+              </Button>
+            ) : (
+              <Button
+                onClick={() => accept.mutate({ token })}
+                disabled={accept.isPending}
+              >
+                {accept.isPending ? "Accepting…" : "Accept invitation"}
+              </Button>
+            )}
             <Button asChild variant="ghost">
               <Link to="/projects">Not now</Link>
             </Button>

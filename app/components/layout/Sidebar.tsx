@@ -15,6 +15,7 @@ import { openCommandMenu } from "@agent-native/toolkit/app/shared";
 import { AgentNativeIcon } from "@agent-native/toolkit/app/shared/AgentNativeIcon";
 import {
   IconBuilding,
+  IconClipboardList,
   IconEdit,
   IconFolder,
   IconHome,
@@ -180,6 +181,13 @@ function PrimaryNavLinks({ collapsed }: { collapsed: boolean }) {
         icon={IconHome}
         active={pathname === HOME_PATH}
       />
+    <SidebarNavLink
+      collapsed={collapsed}
+      to="/assignments"
+      label="My Assignments"
+      icon={IconClipboardList}
+      active={pathname.startsWith("/assignments")}
+    />
       <SidebarNavLink
         collapsed={collapsed}
         to={PROJECTS_PATH}

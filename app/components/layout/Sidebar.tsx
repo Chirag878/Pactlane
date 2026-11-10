@@ -14,6 +14,7 @@ import { OrgSwitcher } from "@agent-native/toolkit/app/org";
 import { openCommandMenu } from "@agent-native/toolkit/app/shared";
 import { AgentNativeIcon } from "@agent-native/toolkit/app/shared/AgentNativeIcon";
 import {
+  IconBuilding,
   IconEdit,
   IconFolder,
   IconHome,
@@ -185,6 +186,16 @@ function PrimaryNavLinks({ collapsed }: { collapsed: boolean }) {
         label={t("navigation.projects")}
         icon={IconFolder}
         active={isProjectAreaPath(pathname)}
+      />
+      <SidebarNavLink
+        collapsed={collapsed}
+        to="/organizations"
+        label="Organizations"
+        icon={IconBuilding}
+        active={
+          pathname.startsWith("/organizations") ||
+          pathname.startsWith("/invitations/")
+        }
       />
     </>
   );

@@ -7,6 +7,8 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 
+import { ProjectAccessPanel } from "@/components/organizations/ProjectAccessPanel";
+import { WorkspaceSwitcher } from "@/components/organizations/WorkspaceSwitcher";
 import { CommitmentLedger } from "@/components/trail/CommitmentLedger";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -57,11 +59,41 @@ export default function ProjectRoute() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-10 p-6">
-      <h1 className="text-xl font-semibold">
-        {data?.project.name ?? (isLoading ? "Loading…" : "Project")}
-      </h1>
+      <header className="flex flex-col gap-3">
+        {data ? (
+          <WorkspaceSwitcher
+            current={
+              data.project.organizationId
+                ? { kind: "organization", id: data.project.organizationId }
+                : { kind: "personal" }
+            }
+          />
+        ) : null}
+        <h1 className="text-xl font-semibold">
+          {data?.project.name ?? (isLoading ? "Loading…" : "Project")}
+        </h1>
+        {data?.project.organizationId ? (
+          <p className="text-sm text-muted-foreground">
+            Organization project in{" "}
+            <Link
+              to={`/organizations/${data.project.organizationId}`}
+              className="underline-offset-2 hover:underline"
+            >
+              {data.project.organizationName ?? "an organization"}
+            </Link>
+          </p>
+        ) : null}
+      </header>
 
       <CommitmentLedger projectId={projectId} />
+
+      {data?.project.organizationId && data.project.canManageAccess ? (
+        <ProjectAccessPanel
+          projectId={projectId}
+          organizationId={data.project.organizationId}
+          organizationName={data.project.organizationName}
+        />
+      ) : null}
 
       <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
         <section

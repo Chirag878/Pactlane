@@ -7,6 +7,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router";
 import { toast } from "sonner";
 
+import { WorkspaceSwitcher } from "@/components/organizations/WorkspaceSwitcher";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +20,10 @@ export default function ProjectsRoute() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const { data, isLoading, error } = useActionQuery("list-projects", {});
+  // Organization projects live in their organization's workspace.
+  const personal = data?.projects.filter((p) => p.organizationId === null);
+  const inOrganizations =
+    (data?.projects.length ?? 0) - (personal?.length ?? 0);
   const createProject = useActionMutation("create-project", {
     onSuccess: (project) => void navigate(`/projects/${project.id}`),
     onError: (err) =>
@@ -31,8 +36,11 @@ export default function ProjectsRoute() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-6">
-      <h1 className="text-xl font-semibold">Projects</h1>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 p-4 sm:p-6">
+      <header className="flex flex-col gap-3">
+        <WorkspaceSwitcher current={{ kind: "personal" }} />
+        <h1 className="text-xl font-semibold">Projects</h1>
+      </header>
 
       <form onSubmit={submit} className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
@@ -57,11 +65,16 @@ export default function ProjectsRoute() {
         </p>
       ) : isLoading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
-      ) : data?.projects.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No projects yet.</p>
+      ) : personal?.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No personal projects yet.
+          {inOrganizations > 0
+            ? " Your organization projects are in their workspace above."
+            : ""}
+        </p>
       ) : (
         <ul className="flex flex-col divide-y divide-border">
-          {data?.projects.map((project) => (
+          {personal?.map((project) => (
             <li key={project.id}>
               <Link
                 to={`/projects/${project.id}`}

@@ -49,22 +49,25 @@ These apply to every turn. Meeting analysis works through the actions below. A p
 
 ## Meeting analysis
 
-| Action                       | Use it to                                             | Key arguments                                                                                  |
-| ---------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `list-projects`              | Find the user's projects                              | none                                                                                           |
-| `create-project`             | Start a project                                       | `name`, `description`                                                                          |
-| `list-meetings`              | See a project's meetings                              | `projectId`                                                                                    |
-| `create-meeting`             | Store a transcript exactly as given                   | `projectId`, `title`, `meetingDate`, `transcript`                                              |
-| `get-meeting`                | Read a transcript and its saved results               | `id`                                                                                           |
-| `save-analysis`              | Save a meeting's analysis as a private draft          | `meetingId`, `summary`, `decisions`, `commitments`, `openQuestions`, `blockers`, `nextMeeting` |
-| `publish-meeting-analysis`   | Human UI-only publication of a reviewed draft         | `meetingId`, `expectedContentRevision` — never callable by the agent                           |
-| `list-people`                | See a project's participants                          | `projectId`                                                                                    |
-| `add-person`                 | Add a participant the user named                      | `projectId`, `displayName`, `aliases`, `email`                                                 |
-| `update-commitment`          | Correct a commitment                                  | `id`, `expectedVersion`, and only the changed fields                                           |
-| `get-commitment-history`     | See who changed a commitment and when                 | `id`                                                                                           |
-| `get-commitment-ledger`      | See every commitment in a project with derived health | `projectId`, `asOf`                                                                            |
-| `get-commitment-trail`       | Read one commitment's timeline across meetings        | `id`, `asOf`                                                                                   |
-| `find-commitment-candidates` | Find statements that may refer to earlier commitments | `meetingId`                                                                                    |
+| Action                       | Use it to                                                     | Key arguments                                                                                  |
+| ---------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `list-projects`              | Find the user's projects                                      | none                                                                                           |
+| `create-project`             | Start a project                                               | `name`, `description`                                                                          |
+| `list-meetings`              | See a project's meetings                                      | `projectId`                                                                                    |
+| `create-meeting`             | Store a transcript exactly as given                           | `projectId`, `title`, `meetingDate`, `transcript`                                              |
+| `get-meeting`                | Read a transcript and its saved results                       | `id`                                                                                           |
+| `save-analysis`              | Save a meeting's analysis as a private draft                  | `meetingId`, `summary`, `decisions`, `commitments`, `openQuestions`, `blockers`, `nextMeeting` |
+| `publish-meeting-analysis`   | Human UI-only publication of a reviewed draft                 | `meetingId`, `expectedContentRevision` — never callable by the agent                           |
+| `list-people`                | See a project's participants                                  | `projectId`                                                                                    |
+| `add-person`                 | Add a participant the user named                              | `projectId`, `displayName`, `aliases`, `email`                                                 |
+| `update-commitment`          | Correct a commitment                                          | `id`, `expectedVersion`, and only the changed fields                                           |
+| `get-commitment-history`     | See who changed a commitment and when                         | `id`                                                                                           |
+| `get-commitment-ledger`      | See every commitment in a project with derived health         | `projectId`, `asOf`                                                                            |
+| `get-commitment-trail`       | Read one commitment's timeline across meetings                | `id`, `asOf`                                                                                   |
+| `find-commitment-candidates` | Find statements that may refer to earlier commitments         | `meetingId`                                                                                    |
+| `list-my-organizations`      | See the organizations the user belongs to                     | none                                                                                           |
+| `get-organization`           | Read an organization and the projects the user can open in it | `organizationId`                                                                               |
+| `list-organization-members`  | See an organization's members and roles                       | `organizationId`                                                                               |
 
 When asked to analyze a meeting:
 
@@ -98,6 +101,13 @@ AI proposes and a person decides. When the user asks you to change a commitment:
 3. Your edits are proposals. They do not clear review flags and they withdraw an earlier confirmation. You cannot confirm, reject or restore a commitment: the review action is for a signed-in person only.
 4. Evidence verification and human confirmation are different. A person accepting a commitment never makes a missing quotation verified, so never describe it that way. Quote the verification status that `get-meeting` returns.
 5. Say a change succeeded only when the action result confirms it. An update that changes nothing reports `changed: false` and writes no history.
+
+## Organizations
+
+1. A person creates organizations, invites, accepts invitations, removes members and transfers ownership in the app. Those actions refuse agent callers, so never claim to have done any of them; point the user to the Organizations page.
+2. Organization membership never grants project access. A member sees an organization project only when they own it or its owner shared it with them, and owners and admins are no exception. Do not suggest that a role reveals a project.
+3. Never reveal or reconstruct an invitation link. Links are shown once to the person who created them, and only a hash is stored.
+4. `create-project` with an `organizationId` is for a person in the app; create personal projects only, unless the user does it themselves.
 
 ## Pactlane engineering rules
 

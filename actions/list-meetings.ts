@@ -18,7 +18,18 @@ export default defineAction({
   }),
   http: { method: "GET" },
   outputSchema: z.object({
-    project: z.object({ id: z.string(), name: z.string() }),
+    project: z.object({
+      id: z.string(),
+      name: z.string(),
+      organizationId: z
+        .string()
+        .nullable()
+        .describe("Organization the project belongs to, or null if personal"),
+      organizationName: z.string().nullable(),
+      canManageAccess: z
+        .boolean()
+        .describe("Whether the caller may grant or remove project access"),
+    }),
     meetings: z.array(
       z.object({
         id: z.string(),
@@ -33,7 +44,15 @@ export default defineAction({
     requireActor(ctx);
     return getDb().transaction(
       async (tx) => {
-        const { resource } = await authorizeProject(projectId, "viewer");
+        const { resource, role } = await authorizeProject(projectId, "viewer");
+        const organizationId =
+          (resource.organizationId as string | null) ?? null;
+        const [organization] = organizationId
+          ? await tx
+              .select({ name: schema.pactlaneOrganizations.name })
+              .from(schema.pactlaneOrganizations)
+              .where(eq(schema.pactlaneOrganizations.id, organizationId))
+          : [];
         const meetings = await tx
           .select({
             id: schema.meetings.id,
@@ -49,7 +68,13 @@ export default defineAction({
             desc(schema.meetings.createdAt),
           );
         return {
-          project: { id: projectId, name: resource.name as string },
+          project: {
+            id: projectId,
+            name: resource.name as string,
+            organizationId,
+            organizationName: organization?.name ?? null,
+            canManageAccess: role === "owner" || role === "admin",
+          },
           meetings,
         };
       },

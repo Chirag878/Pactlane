@@ -1,8 +1,7 @@
-import { defineAction, fail } from "@agent-native/core/action";
-import { and, eq } from "drizzle-orm";
+import { defineAction } from "@agent-native/core/action";
 import { z } from "zod";
 
-import { getDb, schema } from "../server/db/index.js";
+import { getDb } from "../server/db/index.js";
 import {
   authorizeMeeting,
   authorizeProject,
@@ -25,32 +24,13 @@ export default defineAction({
   outputSchema: meetingResultSchema,
   run: async ({ id }, ctx) => {
     requireActor(ctx);
-    const meeting = await authorizeMeeting(id, "viewer");
-    const access = await authorizeProject(meeting.projectId, "viewer");
-    const canPublish = access.role !== "viewer";
     return getDb().transaction(
       async (tx) => {
-        const [snapshotMeeting] = await tx
-          .select()
-          .from(schema.meetings)
-          .where(
-            and(
-              eq(schema.meetings.id, meeting.id),
-              eq(schema.meetings.projectId, meeting.projectId),
-            ),
-          )
-          .limit(1);
-        if (!snapshotMeeting) {
-          fail(
-            "This project does not exist or you do not have the required access.",
-            {
-              errorCode: "access_denied",
-              statusCode: 403,
-            },
-          );
-        }
+        const meeting = await authorizeMeeting(id, "viewer");
+        const access = await authorizeProject(meeting.projectId, "viewer");
+        const canPublish = access.role !== "viewer";
         return loadMeetingResult(
-          snapshotMeeting,
+          meeting,
           { includeDraft: canPublish, canPublish },
           tx,
         );

@@ -3,12 +3,13 @@ import {
   fail,
   type WriteReceipt,
 } from "@agent-native/core/action";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeProject,
+  projectAccessWhere,
   requireActor,
 } from "../server/lib/action-context.js";
 import { personResult } from "../server/lib/people.js";
@@ -80,7 +81,31 @@ export default defineAction({
       email,
     };
     await getDb().transaction(async (tx) => {
-      await tx.insert(schema.people).values(person);
+      const inserted = await tx
+        .insert(schema.people)
+        .select(
+          tx
+            .select({
+              id: sql<string>`${person.id}`.as("id"),
+              projectId: sql<string>`${schema.projects.id}`.as("project_id"),
+              displayName: sql<string>`${person.displayName}`.as(
+                "display_name",
+              ),
+              aliases: sql<string>`${JSON.stringify(person.aliases)}::jsonb`.as(
+                "aliases",
+              ),
+              email: sql<string | null>`${email}`.as("email"),
+              createdAt: sql<Date>`now()`.as("created_at"),
+              updatedAt: sql<Date>`now()`.as("updated_at"),
+            })
+            .from(schema.projects)
+            .where(projectAccessWhere(projectId, "editor")),
+        )
+        .returning({ id: schema.people.id });
+      if (inserted.length === 0) {
+        await authorizeProject(projectId, "editor");
+        return;
+      }
       await tx.insert(schema.changes).values({
         projectId,
         entityType: "person",

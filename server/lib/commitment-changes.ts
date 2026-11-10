@@ -3,7 +3,11 @@ import { and, eq, sql } from "drizzle-orm";
 
 import type { ReviewFlag, ReviewState } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
-import type { Actor } from "./action-context.js";
+import {
+  authorizeProject,
+  projectAccessExists,
+  type Actor,
+} from "./action-context.js";
 import { invalidateAnalysisPublication } from "./analysis-publication.js";
 import { summarizeFlags } from "./analysis-review.js";
 import { loadCommitmentResult } from "./meeting-results.js";
@@ -77,10 +81,16 @@ export async function saveCommitmentChange(options: {
           eq(schema.commitments.id, current.id),
           eq(schema.commitments.projectId, current.projectId),
           eq(schema.commitments.version, expectedVersion),
+          projectAccessExists(current.projectId, "editor"),
         ),
       )
       .returning();
-    if (!row) return null;
+    if (!row) {
+      // Distinguish a stale value from permission revoked after the row was
+      // first read. This check is bound to the active transaction.
+      await authorizeProject(current.projectId, "editor");
+      return null;
+    }
     await tx.insert(schema.changes).values({
       projectId: current.projectId,
       entityType: "commitment",

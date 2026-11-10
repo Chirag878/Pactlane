@@ -9,6 +9,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeMeeting,
+  projectAccessExists,
   requireActor,
 } from "../server/lib/action-context.js";
 import {
@@ -44,9 +45,9 @@ export default defineAction({
         statusCode: 403,
       });
     }
-    const meeting = await authorizeMeeting(meetingId, "editor");
     const publishedAt = new Date();
-    const changed = await getDb().transaction(async (tx) => {
+    const outcome = await getDb().transaction(async (tx) => {
+      const meeting = await authorizeMeeting(meetingId, "editor");
       const published = await tx
         .update(schema.meetings)
         .set({
@@ -65,79 +66,78 @@ export default defineAction({
               expectedContentRevision,
             ),
             isNotNull(schema.meetings.analysisHash),
+            projectAccessExists(meeting.projectId, "editor"),
           ),
         )
         .returning({ id: schema.meetings.id });
+      let changed = published.length > 0;
       if (published.length === 0) {
-        const [current] = await tx
-          .select({
-            analysisHash: schema.meetings.analysisHash,
-            state: schema.meetings.analysisPublicationState,
-            contentRevision: schema.meetings.analysisContentRevision,
-            publishedRevision: schema.meetings.analysisPublishedRevision,
-          })
-          .from(schema.meetings)
-          .where(
-            and(
-              eq(schema.meetings.id, meeting.id),
-              eq(schema.meetings.projectId, meeting.projectId),
-            ),
-          )
-          .limit(1);
-        if (!current?.analysisHash) {
+        // Re-check through the transaction after the guarded mutation. A
+        // revoked editor receives access_denied rather than a state conflict.
+        const current = await authorizeMeeting(meetingId, "editor");
+        if (!current.analysisHash) {
           fail("Analyze this meeting before publishing it.", {
             errorCode: "analysis_not_saved",
             statusCode: 409,
           });
         }
-        if (current.contentRevision !== expectedContentRevision) {
+        if (current.analysisContentRevision !== expectedContentRevision) {
           fail(
             "This analysis changed after you reviewed it. Review the latest draft before publishing.",
             {
               errorCode: "analysis_revision_conflict",
               statusCode: 409,
-              details: { currentContentRevision: current.contentRevision },
+              details: {
+                currentContentRevision: current.analysisContentRevision,
+              },
             },
           );
         }
         if (
-          current.state === "published" &&
-          current.publishedRevision === expectedContentRevision
+          current.analysisPublicationState === "published" &&
+          current.analysisPublishedRevision === expectedContentRevision
         ) {
-          return false;
+          changed = false;
+        } else {
+          fail("This analysis cannot be published from its current state.", {
+            errorCode: "analysis_publication_conflict",
+            statusCode: 409,
+          });
         }
-        fail("This analysis cannot be published from its current state.", {
-          errorCode: "analysis_publication_conflict",
-          statusCode: 409,
+      }
+      if (changed) {
+        await tx.insert(schema.changes).values({
+          projectId: meeting.projectId,
+          entityType: "meeting",
+          entityId: meeting.id,
+          actorType: "user",
+          actorId: actor.email,
+          operation: "update",
+          beforeState: {
+            analysisPublicationState: "draft",
+            analysisContentRevision: expectedContentRevision,
+          },
+          afterState: {
+            analysisPublicationState: "published",
+            analysisContentRevision: expectedContentRevision,
+            analysisPublishedRevision: expectedContentRevision,
+            analysisPublishedBy: actor.email,
+            analysisPublishedAt: publishedAt.toISOString(),
+          },
         });
       }
-      await tx.insert(schema.changes).values({
-        projectId: meeting.projectId,
-        entityType: "meeting",
-        entityId: meeting.id,
-        actorType: "user",
-        actorId: actor.email,
-        operation: "update",
-        beforeState: {
-          analysisPublicationState: "draft",
-          analysisContentRevision: expectedContentRevision,
-        },
-        afterState: {
-          analysisPublicationState: "published",
-          analysisContentRevision: expectedContentRevision,
-          analysisPublishedRevision: expectedContentRevision,
-          analysisPublishedBy: actor.email,
-          analysisPublishedAt: publishedAt.toISOString(),
-        },
-      });
-      return true;
+      const latest = await authorizeMeeting(meetingId, "editor");
+      return {
+        changed,
+        result: await loadMeetingResult(
+          latest,
+          { includeDraft: true, canPublish: true },
+          tx,
+        ),
+      };
     });
 
-    const latest = await authorizeMeeting(meetingId, "editor");
-    const result = await loadMeetingResult(latest, {
-      includeDraft: true,
-      canPublish: true,
-    });
+    const { changed, result } = outcome;
     const _receipt: WriteReceipt = {
       changed,
       verified:

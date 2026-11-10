@@ -101,6 +101,8 @@ export type ReviewFlagCode = (typeof REVIEW_FLAG_CODES)[number];
 export interface ReviewFlag {
   code: ReviewFlagCode;
   message: string;
+  /** Present when this flag came from evidence linked from another meeting. */
+  sourceMeetingId?: string;
 }
 
 export const MAX_COMMITMENT_DESCRIPTION_LENGTH = 1_000;

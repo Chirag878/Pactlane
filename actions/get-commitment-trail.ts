@@ -1,8 +1,7 @@
 import { defineAction, fail } from "@agent-native/core/action";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb, schema } from "../server/db/index.js";
+import { getDb } from "../server/db/index.js";
 import {
   authorizeCommitment,
   authorizeProject,
@@ -32,25 +31,17 @@ export default defineAction({
   outputSchema: commitmentTrailResult,
   run: async ({ id, asOf }, ctx) => {
     requireActor(ctx);
-    const commitment = await authorizeCommitment(id, "viewer");
-    const access = await authorizeProject(commitment.projectId, "viewer");
-    const includeDraft = access.role !== "viewer";
     return getDb().transaction(
       async (tx) => {
-        const [snapshotCommitment] = await tx
-          .select()
-          .from(schema.commitments)
-          .where(
-            and(
-              eq(schema.commitments.id, commitment.id),
-              eq(schema.commitments.projectId, commitment.projectId),
-            ),
-          )
-          .limit(1);
+        const snapshotCommitment = await authorizeCommitment(id, "viewer");
+        const access = await authorizeProject(
+          snapshotCommitment.projectId,
+          "viewer",
+        );
+        const includeDraft = access.role !== "viewer";
         if (
-          !snapshotCommitment ||
-          (!includeDraft &&
-            !(await commitmentIsPublished(snapshotCommitment, tx)))
+          !includeDraft &&
+          !(await commitmentIsPublished(snapshotCommitment, tx))
         ) {
           fail(
             "This project does not exist or you do not have the required access.",

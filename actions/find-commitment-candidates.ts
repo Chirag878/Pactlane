@@ -64,22 +64,12 @@ export default defineAction({
   }),
   run: async ({ meetingId }, ctx) => {
     requireActor(ctx);
-    const meeting = await authorizeMeeting(meetingId, "viewer");
-    const { projectId } = meeting;
-    const access = await authorizeProject(projectId, "viewer");
-    const includeDraft = access.role !== "viewer";
     return getDb().transaction(
       async (db) => {
-        const [snapshotMeeting] = await db
-          .select()
-          .from(schema.meetings)
-          .where(
-            and(
-              eq(schema.meetings.id, meeting.id),
-              eq(schema.meetings.projectId, projectId),
-            ),
-          )
-          .limit(1);
+        const snapshotMeeting = await authorizeMeeting(meetingId, "viewer");
+        const { projectId } = snapshotMeeting;
+        const access = await authorizeProject(projectId, "viewer");
+        const includeDraft = access.role !== "viewer";
         if (
           !snapshotMeeting ||
           (!includeDraft &&

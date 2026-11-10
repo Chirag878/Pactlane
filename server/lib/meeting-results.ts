@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -13,6 +13,7 @@ import {
   REVIEW_STATES,
 } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
+import { viewerVisibleCommitmentReview } from "./analysis-publication.js";
 
 const evidenceResult = z.object({
   id: z.string(),
@@ -156,12 +157,17 @@ export function toCommitmentResult(
   c: Commitment,
   ownerDisplayName: string | null,
   evidence: EvidenceResult[],
+  options: {
+    viewerReview?: ReturnType<typeof viewerVisibleCommitmentReview>;
+    redactVersion?: boolean;
+  } = {},
 ): CommitmentResult {
+  const review = options.viewerReview ?? c;
   return {
     id: c.id,
     projectId: c.projectId,
     originMeetingId: c.originMeetingId,
-    version: c.version,
+    version: options.redactVersion ? 0 : c.version,
     description: c.description,
     ownerId: c.ownerId,
     ownerDisplayName,
@@ -170,9 +176,9 @@ export function toCommitmentResult(
     statedDueText: c.statedDueText,
     priority: c.priority,
     status: c.status,
-    needsReview: c.needsReview,
-    reviewReason: c.reviewReason,
-    reviewFlags: c.reviewFlags,
+    needsReview: review.needsReview,
+    reviewReason: review.reviewReason,
+    reviewFlags: review.reviewFlags,
     reviewState: c.reviewState,
     reviewedBy: c.reviewedBy,
     reviewedAt: c.reviewedAt ? c.reviewedAt.toISOString() : null,
@@ -420,6 +426,55 @@ export async function loadMeetingResult(
         )
     : [];
   const ownerNames = new Map(owners.map((o) => [o.id, o.displayName]));
+  const resultCommitmentIds = [
+    ...new Set(
+      [...commitments, ...visibleLinkedCommitments].map(
+        (commitment) => commitment.id,
+      ),
+    ),
+  ];
+  const hiddenReviewRows =
+    options.includeDraft || resultCommitmentIds.length === 0
+      ? []
+      : await db
+          .select({
+            commitmentId: schema.commitmentEvidence.commitmentId,
+            meetingId: schema.commitmentEvidence.meetingId,
+            meetingTitle: schema.meetings.title,
+            verificationStatus: schema.commitmentEvidence.verificationStatus,
+          })
+          .from(schema.commitmentEvidence)
+          .innerJoin(
+            schema.meetings,
+            and(
+              eq(schema.meetings.id, schema.commitmentEvidence.meetingId),
+              eq(
+                schema.meetings.projectId,
+                schema.commitmentEvidence.projectId,
+              ),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.commitmentEvidence.projectId, projectId),
+              inArray(
+                schema.commitmentEvidence.commitmentId,
+                resultCommitmentIds,
+              ),
+              isNotNull(schema.commitmentEvidence.linkedBy),
+              ne(schema.commitmentEvidence.verificationStatus, "verified"),
+              eq(schema.meetings.analysisPublicationState, "draft"),
+            ),
+          );
+  const hiddenReviewByCommitment = new Map<
+    string,
+    Omit<(typeof hiddenReviewRows)[number], "commitmentId">[]
+  >();
+  for (const row of hiddenReviewRows) {
+    const list = hiddenReviewByCommitment.get(row.commitmentId) ?? [];
+    list.push(row);
+    hiddenReviewByCommitment.set(row.commitmentId, list);
+  }
   const evidenceByCommitment = groupEvidence(
     commitmentEvidence,
     "commitmentId",
@@ -435,6 +490,15 @@ export async function loadMeetingResult(
       c,
       c.ownerId ? (ownerNames.get(c.ownerId) ?? null) : null,
       evidenceByCommitment.get(c.id) ?? [],
+      options.includeDraft
+        ? {}
+        : {
+            viewerReview: viewerVisibleCommitmentReview(
+              c,
+              hiddenReviewByCommitment.get(c.id) ?? [],
+            ),
+            redactVersion: true,
+          },
     );
 
   return {

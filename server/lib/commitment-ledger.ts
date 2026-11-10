@@ -1,4 +1,13 @@
-import { and, desc, eq, getTableColumns, isNull, max, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  getTableColumns,
+  isNull,
+  max,
+  or,
+  sql,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 
@@ -8,7 +17,10 @@ import {
   REVIEW_STATES,
 } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
-import { viewerVisibleChange } from "./analysis-publication.js";
+import {
+  viewerVisibleChange,
+  viewerVisibleCommitmentReview,
+} from "./analysis-publication.js";
 import {
   commitmentHealth,
   commitmentHealthResult,
@@ -86,62 +98,71 @@ export async function loadLedgerEntries(
         eq(schema.commitmentEvidence.commitmentId, commitmentId),
       )
     : eq(schema.commitmentEvidence.projectId, projectId);
+  const latestChanges = db
+    .select({
+      entityId: schema.changes.entityId,
+      at: max(schema.changes.createdAt).as("at"),
+    })
+    .from(schema.changes)
+    .where(
+      and(
+        eq(schema.changes.projectId, projectId),
+        eq(schema.changes.entityType, "commitment"),
+        includeDraft ? undefined : viewerVisibleChange(),
+      ),
+    )
+    .groupBy(schema.changes.entityId)
+    .as("ledger_latest_changes");
 
-  const [commitments, evidence, meetings, people, latestChanges] =
-    await Promise.all([
-      db
-        .select(getTableColumns(schema.commitments))
-        .from(schema.commitments)
-        .leftJoin(
-          originMeeting,
-          and(
-            eq(originMeeting.projectId, schema.commitments.projectId),
-            eq(originMeeting.id, schema.commitments.originMeetingId),
-          ),
-        )
-        .where(commitmentScope)
-        .orderBy(
-          desc(schema.commitments.createdAt),
-          desc(schema.commitments.id),
-        )
-        .limit(LEDGER_LIMIT + 1),
-      db
-        .select({
-          commitmentId: schema.commitmentEvidence.commitmentId,
-          meetingId: schema.commitmentEvidence.meetingId,
-          verificationStatus: schema.commitmentEvidence.verificationStatus,
-          linkedBy: schema.commitmentEvidence.linkedBy,
-        })
-        .from(schema.commitmentEvidence)
-        .where(evidenceScope),
-      db
-        .select({
-          id: schema.meetings.id,
-          title: schema.meetings.title,
-          date: schema.meetings.meetingDate,
-          analysisPublicationState: schema.meetings.analysisPublicationState,
-        })
-        .from(schema.meetings)
-        .where(eq(schema.meetings.projectId, projectId)),
-      db
-        .select({ id: schema.people.id, name: schema.people.displayName })
-        .from(schema.people)
-        .where(eq(schema.people.projectId, projectId)),
-      db
-        .select({
-          entityId: schema.changes.entityId,
-          at: max(schema.changes.createdAt),
-        })
-        .from(schema.changes)
-        .where(
-          and(
-            eq(schema.changes.projectId, projectId),
-            eq(schema.changes.entityType, "commitment"),
-            includeDraft ? undefined : viewerVisibleChange(),
-          ),
-        )
-        .groupBy(schema.changes.entityId),
-    ]);
+  const [commitments, evidence, meetings, people] = await Promise.all([
+    db
+      .select({
+        ...getTableColumns(schema.commitments),
+        visibleLastUpdatedAt: sql<Date>`coalesce(${latestChanges.at}, ${schema.commitments.createdAt})`,
+      })
+      .from(schema.commitments)
+      .leftJoin(
+        originMeeting,
+        and(
+          eq(originMeeting.projectId, schema.commitments.projectId),
+          eq(originMeeting.id, schema.commitments.originMeetingId),
+        ),
+      )
+      .leftJoin(
+        latestChanges,
+        eq(latestChanges.entityId, schema.commitments.id),
+      )
+      .where(commitmentScope)
+      .orderBy(
+        desc(
+          sql`coalesce(${latestChanges.at}, ${schema.commitments.createdAt})`,
+        ),
+        desc(schema.commitments.id),
+      )
+      .limit(LEDGER_LIMIT + 1),
+    db
+      .select({
+        commitmentId: schema.commitmentEvidence.commitmentId,
+        meetingId: schema.commitmentEvidence.meetingId,
+        verificationStatus: schema.commitmentEvidence.verificationStatus,
+        linkedBy: schema.commitmentEvidence.linkedBy,
+      })
+      .from(schema.commitmentEvidence)
+      .where(evidenceScope),
+    db
+      .select({
+        id: schema.meetings.id,
+        title: schema.meetings.title,
+        date: schema.meetings.meetingDate,
+        analysisPublicationState: schema.meetings.analysisPublicationState,
+      })
+      .from(schema.meetings)
+      .where(eq(schema.meetings.projectId, projectId)),
+    db
+      .select({ id: schema.people.id, name: schema.people.displayName })
+      .from(schema.people)
+      .where(eq(schema.people.projectId, projectId)),
+  ]);
 
   const meetingById = new Map(meetings.map((m) => [m.id, m]));
   const visibleMeetingIds = new Set(
@@ -161,7 +182,6 @@ export async function loadLedgerEntries(
       .map((m) => [m.id, m.date]),
   );
   const ownerNames = new Map(people.map((p) => [p.id, p.name]));
-  const lastChange = new Map(latestChanges.map((c) => [c.entityId, c.at]));
   const evidenceByCommitment = new Map<string, typeof evidence>();
   for (const row of visibleEvidence) {
     const list = evidenceByCommitment.get(row.commitmentId) ?? [];
@@ -173,13 +193,41 @@ export async function loadLedgerEntries(
     .slice(0, LEDGER_LIMIT)
     .map((c): LedgerEntry => {
       const rows = evidenceByCommitment.get(c.id) ?? [];
+      const hiddenReviewSources = includeDraft
+        ? []
+        : evidence
+            .filter(
+              (row) =>
+                row.commitmentId === c.id &&
+                !visibleMeetingIds.has(row.meetingId) &&
+                row.linkedBy !== null,
+            )
+            .flatMap((row) => {
+              const meeting = meetingById.get(row.meetingId);
+              return meeting
+                ? [
+                    {
+                      meetingId: row.meetingId,
+                      meetingTitle: meeting.title,
+                      verificationStatus: row.verificationStatus,
+                    },
+                  ]
+                : [];
+            });
+      const review = includeDraft
+        ? {
+            reviewFlags: c.reviewFlags,
+            reviewReason: c.reviewReason,
+            needsReview: c.needsReview,
+          }
+        : viewerVisibleCommitmentReview(c, hiddenReviewSources);
       const health = commitmentHealth(
         {
           status: c.status,
           dueDate: c.dueDate,
           reviewState: c.reviewState,
-          needsReview: c.needsReview,
-          reviewFlags: c.reviewFlags,
+          needsReview: review.needsReview,
+          reviewFlags: review.reviewFlags,
           originMeetingId: c.originMeetingId,
           evidence: rows,
         },
@@ -231,9 +279,7 @@ export async function loadLedgerEntries(
           notVerified: rows.length - verified,
         },
         meetings: related,
-        lastUpdatedAt: new Date(
-          lastChange.get(c.id) ?? c.updatedAt,
-        ).toISOString(),
+        lastUpdatedAt: new Date(c.visibleLastUpdatedAt).toISOString(),
         health,
       };
     });

@@ -7,8 +7,16 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
-import { requireActor } from "../server/lib/action-context.js";
-import { invalidateAnalysisPublication } from "../server/lib/analysis-publication.js";
+import {
+  authorizeProject,
+  projectAccessExists,
+  projectAccessWhere,
+  requireActor,
+} from "../server/lib/action-context.js";
+import {
+  invalidateAnalysisPublication,
+  linkedEvidenceReviewFlag,
+} from "../server/lib/analysis-publication.js";
 import { utcToday } from "../server/lib/commitment-ledger.js";
 import {
   commitmentTrailResult,
@@ -140,34 +148,48 @@ export default defineAction({
       quote,
       verificationStatus: verification.status,
     };
-    const flag =
-      verification.status === "verified"
-        ? null
-        : {
-            code: "evidence" as const,
-            message:
-              verification.status === "missing"
-                ? `A quotation linked from "${meeting.title}" was not found in that transcript.`
-                : `A quotation linked from "${meeting.title}" occurs more than once in that transcript.`,
-          };
+    const flag = linkedEvidenceReviewFlag({
+      meetingId,
+      meetingTitle: meeting.title,
+      verificationStatus: verification.status,
+    });
 
     const outcome = await db.transaction(async (tx) => {
+      // Re-load access through the active transaction. The insert below also
+      // carries the editor predicate, so a stale pre-transaction row cannot
+      // authorize the write.
+      await loadLinkPair(commitmentId, meetingId);
+      const evidenceId = crypto.randomUUID();
       const inserted = await tx
         .insert(schema.commitmentEvidence)
-        .values({
-          projectId,
-          commitmentId,
-          meetingId,
-          sourceQuote: quote,
-          sourceStart: verification.sourceStart,
-          sourceEnd: verification.sourceEnd,
-          verificationStatus: verification.status,
-          linkedBy: actor.email,
-          linkedAt,
-        })
+        .select(
+          tx
+            .select({
+              id: sql<string>`${evidenceId}`.as("id"),
+              projectId: sql<string>`${schema.projects.id}`.as("project_id"),
+              commitmentId: sql<string>`${commitmentId}`.as("commitment_id"),
+              meetingId: sql<string>`${meetingId}`.as("meeting_id"),
+              sourceQuote: sql<string>`${quote}`.as("source_quote"),
+              sourceStart: sql<number | null>`${verification.sourceStart}`.as(
+                "source_start",
+              ),
+              sourceEnd: sql<number | null>`${verification.sourceEnd}`.as(
+                "source_end",
+              ),
+              verificationStatus: sql<
+                (typeof verification)["status"]
+              >`${verification.status}`.as("verification_status"),
+              linkedBy: sql<string>`${actor.email}`.as("linked_by"),
+              linkedAt: sql<Date>`${linkedAt}`.as("linked_at"),
+              createdAt: sql<Date>`now()`.as("created_at"),
+            })
+            .from(schema.projects)
+            .where(projectAccessWhere(projectId, "editor")),
+        )
         .onConflictDoNothing()
         .returning({ id: schema.commitmentEvidence.id });
       const isNew = inserted.length > 0;
+      if (!isNew) await authorizeProject(projectId, "editor");
 
       if (isNew) {
         const before: Record<string, unknown> = { evidenceLink: null };
@@ -189,6 +211,7 @@ export default defineAction({
                 eq(schema.commitments.projectId, projectId),
                 eq(schema.commitments.id, commitmentId),
                 ne(schema.commitments.reviewState, "rejected"),
+                projectAccessExists(projectId, "editor"),
               ),
             )
             .returning({ flags: schema.commitments.reviewFlags });
@@ -253,6 +276,7 @@ export default defineAction({
               eq(schema.commitments.projectId, projectId),
               eq(schema.commitments.id, duplicate.id),
               ne(schema.commitments.reviewState, "rejected"),
+              projectAccessExists(projectId, "editor"),
             ),
           )
           .returning({ id: schema.commitments.id });

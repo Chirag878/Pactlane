@@ -19,17 +19,22 @@ export default defineAction({
   outputSchema: z.array(personResult),
   run: async ({ projectId }, ctx) => {
     requireActor(ctx);
-    await authorizeProject(projectId, "viewer");
-    return getDb()
-      .select({
-        id: schema.people.id,
-        projectId: schema.people.projectId,
-        displayName: schema.people.displayName,
-        aliases: schema.people.aliases,
-        email: schema.people.email,
-      })
-      .from(schema.people)
-      .where(eq(schema.people.projectId, projectId))
-      .orderBy(asc(sql`lower(${schema.people.displayName})`));
+    return getDb().transaction(
+      async (tx) => {
+        await authorizeProject(projectId, "viewer");
+        return tx
+          .select({
+            id: schema.people.id,
+            projectId: schema.people.projectId,
+            displayName: schema.people.displayName,
+            aliases: schema.people.aliases,
+            email: schema.people.email,
+          })
+          .from(schema.people)
+          .where(eq(schema.people.projectId, projectId))
+          .orderBy(asc(sql`lower(${schema.people.displayName})`));
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   },
 });

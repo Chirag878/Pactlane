@@ -1,8 +1,7 @@
 import { defineAction } from "@agent-native/core/action";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { getDb, schema } from "../server/db/index.js";
+import { getDb } from "../server/db/index.js";
 import {
   authorizeProject,
   requireActor,
@@ -35,17 +34,13 @@ export default defineAction({
   }),
   run: async ({ projectId, asOf }, ctx) => {
     requireActor(ctx);
-    const access = await authorizeProject(projectId, "viewer");
     const date = asOf ?? utcToday();
     return getDb().transaction(
       async (tx) => {
-        const [project] = await tx
-          .select({ id: schema.projects.id, name: schema.projects.name })
-          .from(schema.projects)
-          .where(eq(schema.projects.id, projectId))
-          .limit(1);
+        const access = await authorizeProject(projectId, "viewer");
+        const project = access.resource;
         return {
-          project: project!,
+          project: { id: project.id, name: project.name },
           asOf: date,
           ...(await loadLedgerEntries(
             projectId,

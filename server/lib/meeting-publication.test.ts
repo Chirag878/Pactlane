@@ -16,6 +16,7 @@ import saveAnalysis from "../../actions/save-analysis.js";
 import updateCommitment from "../../actions/update-commitment.js";
 import { getDb, schema } from "../db/index.js";
 import { migrations } from "../db/migrations.js";
+import { saveCommitmentChange } from "./commitment-changes.js";
 
 const OWNER = "publisher@example.test";
 const VIEWER = "viewer@example.test";
@@ -460,5 +461,246 @@ describe("meeting analysis publication", () => {
         entry.fields.some((field) => field.field === "link"),
       ),
     ).toBe(false);
+  });
+
+  it("keeps draft-linked review flags, versions, health and timestamps private", async () => {
+    const { projectId, meetingId } = await setUp();
+    const reviewed = await call<{
+      analysisContentRevision: number;
+      commitments: { id: string }[];
+    }>(getMeeting, { id: meetingId });
+    await call(publishMeetingAnalysis, {
+      meetingId,
+      expectedContentRevision: reviewed.analysisContentRevision,
+    });
+    const commitmentId = reviewed.commitments[0]!.id;
+
+    const beforeLedger = await call<{
+      entries: {
+        id: string;
+        lastUpdatedAt: string;
+        health: Record<string, unknown>;
+      }[];
+    }>(getCommitmentLedger, { projectId, asOf: "2026-11-13" }, VIEWER);
+    const before = beforeLedger.entries.find(
+      (entry) => entry.id === commitmentId,
+    )!;
+
+    const followUp = await call<{ id: string }>(createMeeting, {
+      projectId,
+      title: "Private evidence review",
+      meetingDate: "2026-11-11",
+      transcript: "Priya said the launch plan is almost ready.",
+    });
+    await call(
+      saveAnalysis,
+      {
+        meetingId: followUp.id,
+        summary: "A private follow-up draft.",
+        decisions: [],
+        commitments: [],
+        openQuestions: [],
+        blockers: [],
+        nextMeeting: null,
+      },
+      OWNER,
+      "tool",
+    );
+    await call(linkCommitmentEvidence, {
+      commitmentId,
+      meetingId: followUp.id,
+      quote: "This quotation is not in the transcript.",
+      asOf: "2026-11-13",
+    });
+
+    const editorLedger = await call<{
+      entries: { id: string; health: { needsReview: boolean } }[];
+    }>(getCommitmentLedger, { projectId, asOf: "2026-11-13" });
+    expect(
+      editorLedger.entries.find((entry) => entry.id === commitmentId)!.health
+        .needsReview,
+    ).toBe(true);
+
+    const viewerLedger = await call<typeof beforeLedger>(
+      getCommitmentLedger,
+      { projectId, asOf: "2026-11-13" },
+      VIEWER,
+    );
+    const after = viewerLedger.entries.find(
+      (entry) => entry.id === commitmentId,
+    )!;
+    expect(after.lastUpdatedAt).toBe(before.lastUpdatedAt);
+    expect(after.health).toEqual(before.health);
+
+    const viewerMeeting = await call<{
+      commitments: {
+        id: string;
+        version: number;
+        needsReview: boolean;
+        reviewReason: string | null;
+        reviewFlags: unknown[];
+      }[];
+    }>(getMeeting, { id: meetingId }, VIEWER);
+    expect(
+      viewerMeeting.commitments.find((item) => item.id === commitmentId),
+    ).toMatchObject({
+      version: 0,
+      needsReview: false,
+      reviewReason: null,
+      reviewFlags: [],
+    });
+  });
+
+  it("filters draft origins before the ledger limit and orders visible rows by visible activity", async () => {
+    const project = await call<{ id: string }>(createProject, {
+      name: `Pagination ${crypto.randomUUID()}`,
+      description: null,
+    });
+    await getDb().insert(schema.projectShares).values({
+      id: crypto.randomUUID(),
+      resourceId: project.id,
+      principalType: "user",
+      principalId: VIEWER,
+      role: "viewer",
+      createdBy: OWNER,
+    });
+    const publishedMeetingId = crypto.randomUUID();
+    const draftMeetingId = crypto.randomUUID();
+    await getDb()
+      .insert(schema.meetings)
+      .values([
+        {
+          id: publishedMeetingId,
+          projectId: project.id,
+          title: "Legacy published",
+          meetingDate: "2026-01-01",
+          transcript: "Legacy transcript",
+          analysisPublicationState: "published",
+          analysisHash: "legacy-published",
+          processingStatus: "processed",
+        },
+        {
+          id: draftMeetingId,
+          projectId: project.id,
+          title: "Private draft",
+          meetingDate: "2026-11-01",
+        },
+      ]);
+
+    const recentlyVisibleId = crypto.randomUUID();
+    const otherVisibleId = crypto.randomUUID();
+    await getDb()
+      .insert(schema.commitments)
+      .values([
+        ...Array.from({ length: 500 }, (_, index) => ({
+          id: crypto.randomUUID(),
+          projectId: project.id,
+          originMeetingId: draftMeetingId,
+          description: `Private draft commitment ${index}`,
+          createdAt: new Date(
+            `2026-11-${String((index % 9) + 1).padStart(2, "0")}T00:00:00Z`,
+          ),
+        })),
+        {
+          id: recentlyVisibleId,
+          projectId: project.id,
+          originMeetingId: publishedMeetingId,
+          description: "Older visible commitment with recent activity",
+          createdAt: new Date("2020-01-01T00:00:00Z"),
+        },
+        {
+          id: otherVisibleId,
+          projectId: project.id,
+          originMeetingId: publishedMeetingId,
+          description: "Other visible commitment",
+          createdAt: new Date("2025-01-01T00:00:00Z"),
+        },
+      ]);
+    await getDb()
+      .insert(schema.changes)
+      .values({
+        projectId: project.id,
+        entityType: "commitment",
+        entityId: recentlyVisibleId,
+        actorType: "user",
+        actorId: OWNER,
+        operation: "update",
+        beforeState: { priority: null },
+        afterState: { priority: "high" },
+        createdAt: new Date("2030-01-01T00:00:00Z"),
+      });
+
+    const ledger = await call<{
+      entries: { id: string; lastUpdatedAt: string }[];
+      truncated: boolean;
+    }>(
+      getCommitmentLedger,
+      { projectId: project.id, asOf: "2026-11-13" },
+      VIEWER,
+    );
+    expect(ledger.truncated).toBe(false);
+    expect(ledger.entries.map((entry) => entry.id)).toEqual([
+      recentlyVisibleId,
+      otherVisibleId,
+    ]);
+    expect(ledger.entries[0]!.lastUpdatedAt).toBe("2030-01-01T00:00:00.000Z");
+  });
+
+  it("rejects a stale preauthorized commitment row after editor access is revoked", async () => {
+    const { projectId, meetingId } = await setUp();
+    const editor = `revoked-${crypto.randomUUID()}@example.test`;
+    const [current] = await getDb()
+      .select()
+      .from(schema.commitments)
+      .where(eq(schema.commitments.originMeetingId, meetingId))
+      .limit(1);
+    const shareId = crypto.randomUUID();
+    await getDb().insert(schema.projectShares).values({
+      id: shareId,
+      resourceId: projectId,
+      principalType: "user",
+      principalId: editor,
+      role: "editor",
+      createdBy: OWNER,
+    });
+
+    // The row represents state an editor legitimately read before revocation.
+    await getDb()
+      .delete(schema.projectShares)
+      .where(eq(schema.projectShares.id, shareId));
+    const beforeChanges = await getDb()
+      .select({ id: schema.changes.id })
+      .from(schema.changes)
+      .where(eq(schema.changes.entityId, current!.id));
+
+    const error = await rejection(
+      Promise.resolve(
+        runWithRequestContext({ userEmail: editor }, () =>
+          saveCommitmentChange({
+            actor: { email: editor, orgId: null, actorType: "user" },
+            current: current!,
+            expectedVersion: current!.version,
+            patch: { priority: "high" },
+            before: { priority: current!.priority },
+            after: { priority: "high" },
+          }),
+        ),
+      ),
+    );
+    expect(error).toMatchObject({ errorCode: "access_denied" });
+
+    const [after] = await getDb()
+      .select()
+      .from(schema.commitments)
+      .where(eq(schema.commitments.id, current!.id));
+    expect(after).toMatchObject({
+      version: current!.version,
+      priority: current!.priority,
+    });
+    const afterChanges = await getDb()
+      .select({ id: schema.changes.id })
+      .from(schema.changes)
+      .where(eq(schema.changes.entityId, current!.id));
+    expect(afterChanges).toEqual(beforeChanges);
   });
 });

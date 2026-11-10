@@ -1,6 +1,65 @@
 import { and, eq, sql } from "drizzle-orm";
 
 import { getDb, schema } from "../db/index.js";
+import { summarizeFlags } from "./analysis-review.js";
+
+type Commitment = typeof schema.commitments.$inferSelect;
+
+export interface LinkedEvidenceReviewSource {
+  meetingId: string;
+  meetingTitle: string;
+  verificationStatus: string;
+}
+
+/** The persisted wording for a review flag created by a linked quotation. */
+export function linkedEvidenceReviewFlag(source: LinkedEvidenceReviewSource) {
+  if (
+    source.verificationStatus !== "missing" &&
+    source.verificationStatus !== "ambiguous"
+  ) {
+    return null;
+  }
+  return {
+    code: "evidence" as const,
+    message:
+      source.verificationStatus === "missing"
+        ? `A quotation linked from "${source.meetingTitle}" was not found in that transcript.`
+        : `A quotation linked from "${source.meetingTitle}" occurs more than once in that transcript.`,
+    sourceMeetingId: source.meetingId,
+  };
+}
+
+/**
+ * Removes review metadata caused only by meetings a viewer cannot inspect.
+ * New flags carry a meeting id; exact legacy wording remains a safe fallback
+ * for rows written before that provenance was stored.
+ */
+export function viewerVisibleCommitmentReview(
+  commitment: Commitment,
+  hiddenSources: LinkedEvidenceReviewSource[],
+) {
+  const hiddenMeetingIds = new Set(hiddenSources.map((row) => row.meetingId));
+  const legacyMessages = new Set(
+    hiddenSources.flatMap((source) => {
+      const flag = linkedEvidenceReviewFlag(source);
+      return flag ? [flag.message] : [];
+    }),
+  );
+  const reviewFlags = commitment.reviewFlags.filter(
+    (flag) =>
+      !(
+        flag.code === "evidence" &&
+        ((flag.sourceMeetingId && hiddenMeetingIds.has(flag.sourceMeetingId)) ||
+          (!flag.sourceMeetingId && legacyMessages.has(flag.message)))
+      ),
+  );
+  return {
+    reviewFlags,
+    reviewReason: summarizeFlags(reviewFlags),
+    needsReview:
+      reviewFlags.length > 0 && commitment.reviewState !== "rejected",
+  };
+}
 
 /**
  * A commitment is private while its originating analysis is a draft. This is

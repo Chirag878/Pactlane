@@ -9,6 +9,7 @@ import { z } from "zod";
 import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeMeeting,
+  projectAccessExists,
   requireActor,
 } from "../server/lib/action-context.js";
 import {
@@ -392,7 +393,9 @@ export default defineAction({
         .where(
           and(
             eq(schema.meetings.id, meetingId),
+            eq(schema.meetings.projectId, projectId),
             isNull(schema.meetings.analysisHash),
+            projectAccessExists(projectId, "editor"),
           ),
         )
         .returning({ id: schema.meetings.id });

@@ -3,8 +3,12 @@ import {
   getRequestOrgId,
   getRequestUserEmail,
 } from "@agent-native/core/server/request-context";
-import { assertAccess, ForbiddenError } from "@agent-native/core/sharing";
-import { eq } from "drizzle-orm";
+import {
+  accessFilter,
+  assertAccess,
+  ForbiddenError,
+} from "@agent-native/core/sharing";
+import { and, eq, exists } from "drizzle-orm";
 
 import type { CHANGE_ACTOR_TYPES } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
@@ -57,6 +61,27 @@ export async function authorizeProject(projectId: string, role: ProjectRole) {
     if (error instanceof ForbiddenError) denyAccess();
     throw error;
   }
+}
+
+/**
+ * SQL guard for the mutation statement itself. Use it in addition to the
+ * caller-friendly authorization check so a revoked role cannot be used by a
+ * row loaded before the write began.
+ */
+export function projectAccessWhere(projectId: string, role: ProjectRole) {
+  return and(
+    eq(schema.projects.id, projectId),
+    accessFilter(schema.projects, schema.projectShares, undefined, role),
+  );
+}
+
+export function projectAccessExists(projectId: string, role: ProjectRole) {
+  return exists(
+    getDb()
+      .select({ id: schema.projects.id })
+      .from(schema.projects)
+      .where(projectAccessWhere(projectId, role)),
+  );
 }
 
 /** Child rows have no owner of their own: access follows their project. */

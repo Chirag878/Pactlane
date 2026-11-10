@@ -1,9 +1,11 @@
 import { defineAction } from "@agent-native/core/action";
+import { sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb, schema } from "../server/db/index.js";
 import {
   authorizeProject,
+  projectAccessWhere,
   requireActor,
 } from "../server/lib/action-context.js";
 import { MAX_TRANSCRIPT_LENGTH } from "../shared/domain.js";
@@ -35,14 +37,46 @@ export default defineAction({
   }),
   run: async ({ projectId, title, meetingDate, transcript }, ctx) => {
     const actor = requireActor(ctx);
-    await authorizeProject(projectId, "editor");
     const id = crypto.randomUUID();
     const meeting = { title: title.trim(), meetingDate };
 
     await getDb().transaction(async (tx) => {
-      await tx
+      await authorizeProject(projectId, "editor");
+      const inserted = await tx
         .insert(schema.meetings)
-        .values({ id, projectId, transcript, ...meeting });
+        .select(
+          tx
+            .select({
+              id: sql<string>`${id}`.as("id"),
+              projectId: sql<string>`${schema.projects.id}`.as("project_id"),
+              title: sql<string>`${meeting.title}`.as("title"),
+              meetingDate: sql<string>`${meetingDate}`.as("meeting_date"),
+              transcript: sql<string>`${transcript}`.as("transcript"),
+              summary: sql<null>`null`.as("summary"),
+              processingStatus: sql<string>`'pending'`.as("processing_status"),
+              analysisHash: sql<null>`null`.as("analysis_hash"),
+              analysisPublicationState: sql<string>`'draft'`.as(
+                "analysis_publication_state",
+              ),
+              analysisContentRevision: sql<number>`0`.as(
+                "analysis_content_revision",
+              ),
+              analysisPublishedBy: sql<null>`null`.as("analysis_published_by"),
+              analysisPublishedAt: sql<null>`null`.as("analysis_published_at"),
+              analysisPublishedRevision: sql<null>`null`.as(
+                "analysis_published_revision",
+              ),
+              createdAt: sql<Date>`now()`.as("created_at"),
+              updatedAt: sql<Date>`now()`.as("updated_at"),
+            })
+            .from(schema.projects)
+            .where(projectAccessWhere(projectId, "editor")),
+        )
+        .returning({ id: schema.meetings.id });
+      if (inserted.length === 0) {
+        await authorizeProject(projectId, "editor");
+        return;
+      }
       await tx.insert(schema.changes).values({
         projectId,
         entityType: "meeting",

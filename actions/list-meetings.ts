@@ -31,24 +31,29 @@ export default defineAction({
   }),
   run: async ({ projectId }, ctx) => {
     requireActor(ctx);
-    const { resource } = await authorizeProject(projectId, "viewer");
-    const meetings = await getDb()
-      .select({
-        id: schema.meetings.id,
-        title: schema.meetings.title,
-        meetingDate: schema.meetings.meetingDate,
-        processingStatus: schema.meetings.processingStatus,
-        analysisPublicationState: schema.meetings.analysisPublicationState,
-      })
-      .from(schema.meetings)
-      .where(eq(schema.meetings.projectId, projectId))
-      .orderBy(
-        desc(schema.meetings.meetingDate),
-        desc(schema.meetings.createdAt),
-      );
-    return {
-      project: { id: projectId, name: resource.name as string },
-      meetings,
-    };
+    return getDb().transaction(
+      async (tx) => {
+        const { resource } = await authorizeProject(projectId, "viewer");
+        const meetings = await tx
+          .select({
+            id: schema.meetings.id,
+            title: schema.meetings.title,
+            meetingDate: schema.meetings.meetingDate,
+            processingStatus: schema.meetings.processingStatus,
+            analysisPublicationState: schema.meetings.analysisPublicationState,
+          })
+          .from(schema.meetings)
+          .where(eq(schema.meetings.projectId, projectId))
+          .orderBy(
+            desc(schema.meetings.meetingDate),
+            desc(schema.meetings.createdAt),
+          );
+        return {
+          project: { id: projectId, name: resource.name as string },
+          meetings,
+        };
+      },
+      { isolationLevel: "repeatable read", accessMode: "read only" },
+    );
   },
 });

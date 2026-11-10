@@ -43,6 +43,18 @@ Each Worker invocation may also have only six connections simultaneously waiting
 
 Never set `AUTH_DISABLED` in production. The `.env` file is not uploaded, so set everything through the host.
 
+## Email delivery (required for invitations)
+
+Accepting an organization invitation requires a verified email, and the app sends verification and sign-in emails through the framework's email provider. Local development works without one; production invitations do not.
+
+| Secret | Required | Purpose |
+| --- | --- | --- |
+| `RESEND_API_KEY` | One of the two | Email provider. Resend works with its sandbox sender |
+| `SENDGRID_API_KEY` | One of the two | Email provider. SendGrid additionally needs `EMAIL_FROM` set to a verified sender |
+| `EMAIL_FROM` | With SendGrid | Verified sender address |
+
+Set the key the same way as the other secrets (host secret store, never committed). Without a provider, password signup skips verification and invitation acceptance fails closed with `email_not_verified`.
+
 ## Cloudflare Workers runbook
 
 Commands use Bash. In PowerShell, set variables with `$env:NAME = "value"`.

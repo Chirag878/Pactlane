@@ -19,6 +19,7 @@ One deployable application, organized by domain. There are no separate services,
 | evidence      | `commitment_evidence`, `decision_evidence`, `meeting_finding_evidence`, `next_meeting_evidence` | Tables implemented           |
 | ledger        | `changes`                                                                                       | Table implemented            |
 | followups     | `followups`                                                                                     | Table implemented            |
+| assignments   | `commitment_assignments`                                                                        | Table implemented (ADR-021)  |
 
 Where code belongs:
 
@@ -80,12 +81,14 @@ erDiagram
   people |o--o{ commitments : owns
   meetings ||--o{ followups : produces
   people |o--o{ followups : receives
+  commitments ||--o{ commitment_assignments : "handed off as"
 ```
 
 - **Commitment** is a single promise with one stable id, however many meetings mention it.
 - **Evidence** links a commitment to a quote from a specific meeting. It also serves as the commitment-to-meeting relationship, so no extra join table exists.
 - **Person** is someone named in a project. Most people never have an account, so owners are `people` rows and not users.
 - **Change** is one recorded modification with before and after state.
+- **Assignment** is one human's delivery of an existing commitment to one authenticated user. It references the commitment instead of copying it, carries its own acknowledgement state (`pending`, `accepted`, `disputed`, `in_progress`, `completed`), and is recorded in `changes` without touching the transcript or evidence. See ADR-021.
 
 - **Decision** is a choice one meeting made, with its own `decision_evidence` quotes. Decisions are not tracked across meetings.
 - **Meeting finding** is an open question or blocker from one meeting, with its own exact evidence quotes. Findings are not commitments or decisions.

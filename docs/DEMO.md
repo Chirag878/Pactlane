@@ -48,6 +48,7 @@ Expected: the presentation is linked to three meetings and still open. It is cal
 | 7. Decide | The user approves or corrects the proposal. | **Deferred** as an agent proposal; manual correction is tested |
 | 8. History | The Commitment Trail shows the sequence and who changed what, and each quote opens its own transcript. | **Tested deterministically**, without undo |
 | 9. Result | A clear final state: one commitment, its full history and a decided next step. | **Partly tested**; the decided-next-step proposal is deferred |
+| 10. Hand off | A confirmed commitment is assigned to a teammate, who accepts it in My Assignments and marks it complete. | **Tested deterministically** (7 assignment tests); browser verification pending |
 
 ## Judging alignment
 

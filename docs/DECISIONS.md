@@ -163,3 +163,11 @@ Lightweight records. Add new entries at the end. To reverse a decision, add a ne
 - **Alternatives:** reusing framework organizations, rejected for the reasons above; a token table on top of framework organizations, rejected because the framework's own invitation path would remain a bypass; granting organization admins access to all projects, rejected by the access policy.
 - **Consequences:** two organization concepts exist: the template's `/settings/organization` (framework) and Pactlane's `/organizations`. Removing a member keeps their shares and history but makes them ineffective, and a returning member regains them. A removed project owner also loses access, and project ownership transfer is not built. Invitation email delivery is not built; an administrator copies the link, which is shown once.
 - **Status:** Accepted
+
+## ADR-021: Assignment handoff reuses commitments with explicit human delivery
+
+- **Context:** The MVP needs one member to hand a confirmed commitment to another and track acknowledgement. A parallel task system would split history; inferring the recipient from a transcript name would misassign work.
+- **Decision:** Assignments are `commitment_assignments` rows referencing the existing commitment, never a copy of it. The recipient is the stable Better Auth user id, resolved from a verified email at send time; the stored email is a display snapshot. Sending needs a published meeting, a confirmed commitment, project editor rights and existing recipient project access, and is a human UI-only action. Acknowledgement (`pending` to `accepted` or `disputed`) belongs to the recipient alone; editors may only advance an accepted assignment. One partial unique index allows a single active assignment per commitment, so concurrent sends cannot duplicate. Status changes are recorded in `changes` without touching the meeting transcript or evidence.
+- **Alternatives:** a separate tasks table, rejected as a parallel system; recipient as free-text email, rejected because addresses change and cannot be verified; agent-sent assignments, rejected because delivery is an accountability decision.
+- **Consequences:** unconfirmed or draft work cannot be assigned; a recipient without project access must be shared the project first. Editors cannot accept on anyone's behalf, and a dispute needs a written reason.
+- **Status:** Accepted

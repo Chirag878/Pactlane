@@ -520,4 +520,104 @@ ALTER TABLE meetings ADD CONSTRAINT meetings_analysis_publication_attribution_ch
   );
 `,
   },
+  {
+    // Additive only. Pactlane organizations are separate from the framework's
+    // own organizations (see ADR-020); existing projects stay personal.
+    version: 8,
+    name: "pactlane-organizations",
+    sql: `
+CREATE TABLE IF NOT EXISTS pactlane_organizations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL
+    CONSTRAINT pactlane_organizations_name_present
+    CHECK (length(btrim(name)) > 0 AND length(name) <= 200),
+  description TEXT
+    CONSTRAINT pactlane_organizations_description_length
+    CHECK (description IS NULL OR length(description) <= 2000),
+  created_by TEXT NOT NULL
+    CONSTRAINT pactlane_organizations_created_by_normalized
+    CHECK (length(created_by) > 0 AND created_by = lower(btrim(created_by))),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS organization_memberships (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  email TEXT NOT NULL
+    CONSTRAINT organization_memberships_email_normalized
+    CHECK (length(email) > 0 AND email = lower(btrim(email))),
+  role TEXT NOT NULL
+    CONSTRAINT organization_memberships_role_check
+    CHECK (role IN ('owner', 'admin', 'member')),
+  status TEXT NOT NULL DEFAULT 'active'
+    CONSTRAINT organization_memberships_status_check
+    CHECK (status IN ('active', 'removed')),
+  added_by TEXT NOT NULL,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  removed_by TEXT,
+  removed_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT organization_memberships_org_email_unique UNIQUE (organization_id, email),
+  CONSTRAINT organization_memberships_removal_complete CHECK (
+    (status = 'active' AND removed_by IS NULL AND removed_at IS NULL)
+    OR (status = 'removed' AND removed_by IS NOT NULL AND removed_at IS NOT NULL)
+  ),
+  CONSTRAINT organization_memberships_owner_active
+    CHECK (role <> 'owner' OR status = 'active'),
+  CONSTRAINT organization_memberships_organization_fk FOREIGN KEY (organization_id)
+    REFERENCES pactlane_organizations (id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS organization_memberships_one_owner
+  ON organization_memberships (organization_id) WHERE role = 'owner';
+CREATE INDEX IF NOT EXISTS organization_memberships_email_idx
+  ON organization_memberships (email, status);
+
+CREATE TABLE IF NOT EXISTS organization_invitations (
+  id TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL,
+  email TEXT NOT NULL
+    CONSTRAINT organization_invitations_email_normalized
+    CHECK (position('@' in email) > 1 AND email = lower(btrim(email))),
+  role TEXT NOT NULL
+    CONSTRAINT organization_invitations_role_check
+    CHECK (role IN ('admin', 'member')),
+  token_hash TEXT NOT NULL
+    CONSTRAINT organization_invitations_token_hash_format
+    CHECK (token_hash ~ '^[0-9a-f]{64}$'),
+  status TEXT NOT NULL DEFAULT 'pending'
+    CONSTRAINT organization_invitations_status_check
+    CHECK (status IN ('pending', 'accepted', 'revoked', 'expired')),
+  invited_by TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  accepted_by TEXT,
+  accepted_at TIMESTAMPTZ,
+  revoked_by TEXT,
+  revoked_at TIMESTAMPTZ,
+  CONSTRAINT organization_invitations_token_hash_unique UNIQUE (token_hash),
+  CONSTRAINT organization_invitations_expiry_after_creation
+    CHECK (expires_at > created_at),
+  CONSTRAINT organization_invitations_acceptance_complete CHECK (
+    (status = 'accepted') = (accepted_by IS NOT NULL AND accepted_at IS NOT NULL)
+  ),
+  CONSTRAINT organization_invitations_accepted_by_recipient
+    CHECK (accepted_by IS NULL OR accepted_by = email),
+  CONSTRAINT organization_invitations_revocation_complete CHECK (
+    (status = 'revoked') = (revoked_by IS NOT NULL AND revoked_at IS NOT NULL)
+  ),
+  CONSTRAINT organization_invitations_organization_fk FOREIGN KEY (organization_id)
+    REFERENCES pactlane_organizations (id) ON DELETE RESTRICT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS organization_invitations_one_pending
+  ON organization_invitations (organization_id, email) WHERE status = 'pending';
+
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS organization_id TEXT;
+ALTER TABLE projects DROP CONSTRAINT IF EXISTS projects_organization_fk;
+ALTER TABLE projects ADD CONSTRAINT projects_organization_fk
+  FOREIGN KEY (organization_id) REFERENCES pactlane_organizations (id) ON DELETE RESTRICT;
+CREATE INDEX IF NOT EXISTS projects_organization_idx
+  ON projects (organization_id) WHERE organization_id IS NOT NULL;
+`,
+  },
 ];

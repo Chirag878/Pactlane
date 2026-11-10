@@ -12,6 +12,7 @@ import { and, eq, exists } from "drizzle-orm";
 
 import type { CHANGE_ACTOR_TYPES } from "../../shared/domain.js";
 import { getDb, schema } from "../db/index.js";
+import { organizationProjectAccess } from "./organizations.js";
 
 type ActorType = (typeof CHANGE_ACTOR_TYPES)[number];
 type ProjectRole = "viewer" | "editor";
@@ -72,6 +73,7 @@ export function projectAccessWhere(projectId: string, role: ProjectRole) {
   return and(
     eq(schema.projects.id, projectId),
     accessFilter(schema.projects, schema.projectShares, undefined, role),
+    organizationProjectAccess(role),
   );
 }
 

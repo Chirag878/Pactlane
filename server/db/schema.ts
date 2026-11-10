@@ -24,6 +24,10 @@ import {
   MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
   ANALYSIS_PUBLICATION_STATES,
+  ORGANIZATION_INVITATION_STATUSES,
+  ORGANIZATION_INVITE_ROLES,
+  ORGANIZATION_MEMBERSHIP_STATUSES,
+  ORGANIZATION_ROLES,
   REVIEW_STATES,
   type ReviewFlag,
 } from "../../shared/domain.js";
@@ -50,11 +54,63 @@ const updatedAt = () =>
     .defaultNow()
     .$onUpdate(() => new Date());
 
+/**
+ * A Pactlane organization (ADR-020). Not the framework's `organizations`
+ * table: membership here never grants project access on its own.
+ */
+export const pactlaneOrganizations = pgTable("pactlane_organizations", {
+  id: id(),
+  name: text("name").notNull(),
+  description: text("description"),
+  createdBy: text("created_by").notNull(),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** One row per person per organization; removal keeps the row as history. */
+export const organizationMemberships = pgTable("organization_memberships", {
+  id: id(),
+  organizationId: text("organization_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role", { enum: ORGANIZATION_ROLES }).notNull(),
+  status: text("status", { enum: ORGANIZATION_MEMBERSHIP_STATUSES })
+    .notNull()
+    .default("active"),
+  addedBy: text("added_by").notNull(),
+  joinedAt: timestamp("joined_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  removedBy: text("removed_by"),
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  updatedAt: updatedAt(),
+});
+
+/** Only the SHA-256 hash of an invitation token is ever stored. */
+export const organizationInvitations = pgTable("organization_invitations", {
+  id: id(),
+  organizationId: text("organization_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role", { enum: ORGANIZATION_INVITE_ROLES }).notNull(),
+  tokenHash: text("token_hash").notNull(),
+  status: text("status", { enum: ORGANIZATION_INVITATION_STATUSES })
+    .notNull()
+    .default("pending"),
+  invitedBy: text("invited_by").notNull(),
+  createdAt: createdAt(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  acceptedBy: text("accepted_by"),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  revokedBy: text("revoked_by"),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+});
+
 export const projects = pgTable("projects", {
   id: id(),
   name: text("name").notNull(),
   description: text("description"),
   ...ownableColumns(),
+  /** Null for a personal project. Set only at creation. */
+  organizationId: text("organization_id"),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });

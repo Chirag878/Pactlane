@@ -19,6 +19,19 @@ export const ANALYSIS_PUBLICATION_STATES = ["draft", "published"] as const;
 export type AnalysisPublicationState =
   (typeof ANALYSIS_PUBLICATION_STATES)[number];
 
+export const ORGANIZATION_ROLES = ["owner", "admin", "member"] as const;
+export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
+/** Roles an invitation may grant. Ownership moves only by explicit transfer. */
+export const ORGANIZATION_INVITE_ROLES = ["admin", "member"] as const;
+export const ORGANIZATION_MEMBERSHIP_STATUSES = ["active", "removed"] as const;
+export const ORGANIZATION_INVITATION_STATUSES = [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+] as const;
+export const ORGANIZATION_INVITATION_TTL_DAYS = 7;
+
 export const MEETING_FINDING_KINDS = ["open_question", "blocker"] as const;
 export type MeetingFindingKind = (typeof MEETING_FINDING_KINDS)[number];
 

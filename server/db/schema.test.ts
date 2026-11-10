@@ -13,6 +13,10 @@ import {
   FOLLOWUP_STATUSES,
   MEETING_FINDING_KINDS,
   MEETING_PROCESSING_STATUSES,
+  ORGANIZATION_INVITATION_STATUSES,
+  ORGANIZATION_INVITE_ROLES,
+  ORGANIZATION_MEMBERSHIP_STATUSES,
+  ORGANIZATION_ROLES,
   PROJECT_VISIBILITIES,
   REVIEW_STATES,
 } from "../../shared/domain.js";
@@ -110,6 +114,9 @@ describe("foundation migration", () => {
       schema.nextMeetingEvidence,
       schema.changes,
       schema.followups,
+      schema.pactlaneOrganizations,
+      schema.organizationMemberships,
+      schema.organizationInvitations,
     ];
     for (const table of tables) {
       const name = getTableName(table);
@@ -153,6 +160,10 @@ describe("foundation migration", () => {
     ["changes_actor_type_check", CHANGE_ACTOR_TYPES],
     ["changes_operation_check", CHANGE_OPERATIONS],
     ["followups_status_check", FOLLOWUP_STATUSES],
+    ["organization_memberships_role_check", ORGANIZATION_ROLES],
+    ["organization_memberships_status_check", ORGANIZATION_MEMBERSHIP_STATUSES],
+    ["organization_invitations_role_check", ORGANIZATION_INVITE_ROLES],
+    ["organization_invitations_status_check", ORGANIZATION_INVITATION_STATUSES],
   ])("%s allows exactly the shared values", async (constraint, values) => {
     const { rows } = await db.query<{ def: string }>(
       `SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = $1`,
@@ -447,5 +458,82 @@ describe("project visibility", () => {
     await expect(
       insert("projects", { id: "p3", name: "Open", visibility: "public" }),
     ).rejects.toThrow(/projects_visibility_check/);
+  });
+});
+
+describe("organization migration", () => {
+  const organization = (id: string) =>
+    insert("pactlane_organizations", {
+      id,
+      name: "Acme",
+      created_by: "owner@example.test",
+    });
+  const invitation = (extra: Record<string, unknown> = {}) =>
+    insert("organization_invitations", {
+      id: crypto.randomUUID(),
+      organization_id: "o1",
+      email: "new@example.test",
+      role: "member",
+      token_hash: "a".repeat(64),
+      invited_by: "owner@example.test",
+      expires_at: "2099-01-01T00:00:00Z",
+      ...extra,
+    });
+
+  beforeEach(async () => {
+    await db.exec(
+      `DELETE FROM organization_invitations; DELETE FROM organization_memberships; UPDATE projects SET organization_id = NULL; DELETE FROM pactlane_organizations`,
+    );
+    await organization("o1");
+  });
+
+  it("leaves existing projects personal and checks the organization link", async () => {
+    const { rows } = await db.query<{ organization_id: string | null }>(
+      `SELECT organization_id FROM projects WHERE id = 'p1'`,
+    );
+    expect(rows[0]!.organization_id).toBeNull();
+    await expect(
+      db.query(
+        `UPDATE projects SET organization_id = 'missing' WHERE id = 'p1'`,
+      ),
+    ).rejects.toThrow();
+    await db.query(
+      `UPDATE projects SET organization_id = 'o1' WHERE id = 'p1'`,
+    );
+  });
+
+  it("keeps the owner active and stores only a token hash", async () => {
+    await insert("organization_memberships", {
+      id: "mem1",
+      organization_id: "o1",
+      email: "owner@example.test",
+      role: "owner",
+      added_by: "owner@example.test",
+    });
+    await expect(
+      db.query(
+        `UPDATE organization_memberships SET status = 'removed', removed_by = 'x', removed_at = now() WHERE id = 'mem1'`,
+      ),
+    ).rejects.toThrow();
+    await expect(
+      insert("organization_memberships", {
+        id: "mem2",
+        organization_id: "o1",
+        email: "Mixed@Example.test",
+        role: "member",
+        added_by: "owner@example.test",
+      }),
+    ).rejects.toThrow();
+    await expect(invitation({ token_hash: "raw-token" })).rejects.toThrow();
+    await expect(invitation({ role: "owner" })).rejects.toThrow();
+    await expect(
+      invitation({
+        status: "accepted",
+        accepted_by: "someone-else@example.test",
+        accepted_at: "2026-11-10T00:00:00Z",
+      }),
+    ).rejects.toThrow();
+    await invitation();
+    await expect(invitation({ token_hash: "b".repeat(64) })).rejects.toThrow();
   });
 });
